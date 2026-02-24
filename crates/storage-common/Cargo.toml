@@ -1,0 +1,12 @@
+[package]
+name = "wrfcoin-storage-common"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared types and traits for WRFCoin storage providers"
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true

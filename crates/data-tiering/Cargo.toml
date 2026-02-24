@@ -1,0 +1,13 @@
+[package]
+name = "wrfcoin-data-tiering"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Hot/warm/cold data tiering orchestrator for WRFCoin storage"
+
+[dependencies]
+wrfcoin-storage-common = { path = "../storage-common" }
+serde.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true

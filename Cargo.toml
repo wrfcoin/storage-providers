@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/storage-common",
+    "crates/ipfs",
+    "crates/filecoin",
+    "crates/arweave",
+    "crates/data-tiering",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/wrfcoin/storage-providers"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
+async-trait = "0.1"

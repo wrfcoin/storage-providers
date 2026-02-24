@@ -1,0 +1,13 @@
+[package]
+name = "wrfcoin-ipfs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "IPFS storage provider for WRFCoin weather data"
+
+[dependencies]
+wrfcoin-storage-common = { path = "../storage-common" }
+serde.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
