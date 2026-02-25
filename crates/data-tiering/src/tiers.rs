@@ -78,3 +78,56 @@ impl TieringConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_tier_costs() {
+        let config = TieringConfig::default();
+        // Hot is most expensive, Archive is cheapest
+        assert!(config.hot.cost_per_gib > config.warm.cost_per_gib);
+        assert!(config.warm.cost_per_gib > config.cold.cost_per_gib);
+        assert!(config.cold.cost_per_gib > config.archive.cost_per_gib);
+    }
+
+    #[test]
+    fn test_default_tier_latencies() {
+        let config = TieringConfig::default();
+        // Hot is fastest, Archive is slowest
+        assert!(config.hot.access_time_ms < config.warm.access_time_ms);
+        assert!(config.warm.access_time_ms < config.cold.access_time_ms);
+        assert!(config.cold.access_time_ms < config.archive.access_time_ms);
+    }
+
+    #[test]
+    fn test_config_for() {
+        let config = TieringConfig::default();
+        assert_eq!(config.config_for(&DataTier::Hot).tier, DataTier::Hot);
+        assert_eq!(config.config_for(&DataTier::Warm).tier, DataTier::Warm);
+        assert_eq!(config.config_for(&DataTier::Cold).tier, DataTier::Cold);
+        assert_eq!(config.config_for(&DataTier::Archive).tier, DataTier::Archive);
+    }
+
+    #[test]
+    fn test_auto_migrate_default() {
+        let config = TieringConfig::default();
+        assert!(config.auto_migrate);
+    }
+
+    #[test]
+    fn test_hot_tier_defaults() {
+        let config = TieringConfig::default();
+        assert_eq!(config.hot.max_size_bytes, 10 * 1024 * 1024 * 1024);
+        assert_eq!(config.hot.max_age_secs, 86_400);
+        assert_eq!(config.hot.access_time_ms, 5);
+    }
+
+    #[test]
+    fn test_archive_tier_defaults() {
+        let config = TieringConfig::default();
+        assert_eq!(config.archive.max_size_bytes, u64::MAX);
+        assert_eq!(config.archive.max_age_secs, u64::MAX);
+    }
+}

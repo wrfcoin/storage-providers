@@ -97,3 +97,63 @@ impl ClusterManager {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn peer(id: &str, lat: f64, lon: f64) -> ClusterPeer {
+        ClusterPeer {
+            id: id.to_string(),
+            address: format!("/ip4/127.0.0.1/tcp/4001/p2p/{}", id),
+            latitude: lat,
+            longitude: lon,
+            capabilities: vec!["pin".to_string()],
+        }
+    }
+
+    #[test]
+    fn test_add_and_list_peers() {
+        let mut cm = ClusterManager::new(IpfsClusterConfig::default());
+        cm.add_peer(peer("peer-1", 40.0, -74.0));
+        cm.add_peer(peer("peer-2", 51.0, 0.0));
+        assert_eq!(cm.peers().len(), 2);
+    }
+
+    #[test]
+    fn test_remove_peer() {
+        let mut cm = ClusterManager::new(IpfsClusterConfig::default());
+        cm.add_peer(peer("peer-1", 0.0, 0.0));
+        assert!(cm.remove_peer("peer-1"));
+        assert_eq!(cm.peers().len(), 0);
+        assert!(!cm.remove_peer("nonexistent"));
+    }
+
+    #[test]
+    fn test_select_peers_near_sorts_by_distance() {
+        let config = IpfsClusterConfig { replication_factor: 2, ..Default::default() };
+        let mut cm = ClusterManager::new(config);
+        cm.add_peer(peer("far", 90.0, 90.0));
+        cm.add_peer(peer("near", 1.0, 1.0));
+        cm.add_peer(peer("medium", 10.0, 10.0));
+
+        let selected = cm.select_peers_near(0.0, 0.0);
+        assert_eq!(selected.len(), 2);
+        assert_eq!(selected[0].id, "near");
+        assert_eq!(selected[1].id, "medium");
+    }
+
+    #[test]
+    fn test_select_peers_empty_cluster() {
+        let cm = ClusterManager::new(IpfsClusterConfig::default());
+        let selected = cm.select_peers_near(0.0, 0.0);
+        assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn test_replication_factor() {
+        let config = IpfsClusterConfig { replication_factor: 5, ..Default::default() };
+        let cm = ClusterManager::new(config);
+        assert_eq!(cm.replication_factor(), 5);
+    }
+}

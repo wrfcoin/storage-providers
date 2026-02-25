@@ -37,13 +37,9 @@ impl FilecoinStorageProvider {
         }
     }
 
-    /// Compute a simple hash for content identification.
+    /// Compute a content hash using SHA-256.
     fn compute_hash(data: &[u8]) -> String {
-        let mut hash: u64 = 5381;
-        for &byte in data {
-            hash = hash.wrapping_mul(33).wrapping_add(byte as u64);
-        }
-        format!("bafy{:016x}", hash)
+        wrfcoin_storage_common::hashing::filecoin_content_id(data).hash
     }
 
     /// Return a reference to the current configuration.

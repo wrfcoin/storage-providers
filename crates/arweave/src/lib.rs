@@ -1,6 +1,7 @@
 pub mod archival;
 pub mod bundling;
 pub mod config;
+pub mod gateway_client;
 pub mod provider;
 
 pub use config::ArweaveConfig;

@@ -99,3 +99,82 @@ impl DataBundler {
         bundle
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(id: &str, data: &[u8], added_at: u64) -> BundleItem {
+        BundleItem {
+            id: id.to_string(),
+            data: data.to_vec(),
+            added_at,
+        }
+    }
+
+    #[test]
+    fn test_none_strategy_always_flushes() {
+        let mut b = DataBundler::new(BundlingStrategy::None);
+        b.add_item(item("1", b"hello", 0));
+        assert!(b.should_flush(0));
+    }
+
+    #[test]
+    fn test_empty_never_flushes() {
+        let b = DataBundler::new(BundlingStrategy::None);
+        assert!(!b.should_flush(0));
+    }
+
+    #[test]
+    fn test_size_threshold() {
+        let mut b = DataBundler::new(BundlingStrategy::SizeThreshold { bytes: 10 });
+        b.add_item(item("1", b"12345", 0));
+        assert!(!b.should_flush(0)); // 5 < 10
+        b.add_item(item("2", b"67890", 0));
+        assert!(b.should_flush(0)); // 10 >= 10
+    }
+
+    #[test]
+    fn test_time_window() {
+        let mut b = DataBundler::new(BundlingStrategy::TimeWindow { secs: 60 });
+        b.add_item(item("1", b"data", 100));
+        assert!(!b.should_flush(150)); // 50 < 60
+        assert!(b.should_flush(160));  // 60 >= 60
+    }
+
+    #[test]
+    fn test_smart_strategy_size() {
+        let mut b = DataBundler::new(BundlingStrategy::Smart);
+        let big = vec![0u8; 1_048_576]; // 1 MiB
+        b.add_item(BundleItem { id: "big".to_string(), data: big, added_at: 0 });
+        assert!(b.should_flush(0)); // >= 1 MiB
+    }
+
+    #[test]
+    fn test_smart_strategy_age() {
+        let mut b = DataBundler::new(BundlingStrategy::Smart);
+        b.add_item(item("1", b"small", 0));
+        assert!(!b.should_flush(100));  // 100 < 300
+        assert!(b.should_flush(300));   // 300 >= 300
+    }
+
+    #[test]
+    fn test_smart_strategy_count() {
+        let mut b = DataBundler::new(BundlingStrategy::Smart);
+        for i in 0..10 {
+            b.add_item(item(&format!("{}", i), b"x", 0));
+        }
+        assert!(b.should_flush(0)); // 10 items
+    }
+
+    #[test]
+    fn test_flush_concatenates_and_drains() {
+        let mut b = DataBundler::new(BundlingStrategy::None);
+        b.add_item(item("1", b"hello", 0));
+        b.add_item(item("2", b"world", 0));
+        assert_eq!(b.pending_count(), 2);
+        let data = b.flush();
+        assert_eq!(data, b"helloworld");
+        assert_eq!(b.pending_count(), 0);
+    }
+}
