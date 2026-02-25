@@ -87,3 +87,86 @@ impl Default for ArchivalManager {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn meta(size: u64, tags: Vec<(&str, &str)>) -> Metadata {
+        let mut tag_map = HashMap::new();
+        for (k, v) in tags {
+            tag_map.insert(k.to_string(), v.to_string());
+        }
+        Metadata {
+            content_type: "application/json".to_string(),
+            size,
+            timestamp: 1000,
+            tags: tag_map,
+        }
+    }
+
+    #[test]
+    fn test_add_policy() {
+        let mut am = ArchivalManager::new();
+        am.add_policy(ArchivalPolicy {
+            retention: RetentionPeriod::Permanent,
+            redundancy: RedundancyLevel::High,
+            min_size: 0,
+            required_tag: None,
+        });
+        assert_eq!(am.policies().len(), 1);
+    }
+
+    #[test]
+    fn test_should_archive_size_threshold() {
+        let mut am = ArchivalManager::new();
+        am.add_policy(ArchivalPolicy {
+            retention: RetentionPeriod::Permanent,
+            redundancy: RedundancyLevel::Standard,
+            min_size: 1024,
+            required_tag: None,
+        });
+        assert!(!am.should_archive(&meta(500, vec![])));
+        assert!(am.should_archive(&meta(1024, vec![])));
+        assert!(am.should_archive(&meta(2048, vec![])));
+    }
+
+    #[test]
+    fn test_should_archive_required_tag() {
+        let mut am = ArchivalManager::new();
+        am.add_policy(ArchivalPolicy {
+            retention: RetentionPeriod::Years(10),
+            redundancy: RedundancyLevel::Critical,
+            min_size: 0,
+            required_tag: Some("weather".to_string()),
+        });
+        assert!(!am.should_archive(&meta(100, vec![])));
+        assert!(am.should_archive(&meta(100, vec![("weather", "true")])));
+    }
+
+    #[test]
+    fn test_should_archive_no_policies() {
+        let am = ArchivalManager::new();
+        assert!(!am.should_archive(&meta(1000, vec![])));
+    }
+
+    #[test]
+    fn test_multiple_policies_any_match() {
+        let mut am = ArchivalManager::new();
+        am.add_policy(ArchivalPolicy {
+            retention: RetentionPeriod::Permanent,
+            redundancy: RedundancyLevel::Basic,
+            min_size: 10_000, // High threshold
+            required_tag: None,
+        });
+        am.add_policy(ArchivalPolicy {
+            retention: RetentionPeriod::Days(30),
+            redundancy: RedundancyLevel::Standard,
+            min_size: 0, // Low threshold
+            required_tag: None,
+        });
+        // Matches second policy even though first doesn't match
+        assert!(am.should_archive(&meta(100, vec![])));
+    }
+}

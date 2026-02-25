@@ -85,3 +85,85 @@ impl Default for AccessTracker {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_record_and_count() {
+        let mut at = AccessTracker::new();
+        at.record_access("cid1", 100);
+        at.record_access("cid1", 200);
+        assert_eq!(at.get_access_count("cid1"), 2);
+        assert_eq!(at.get_access_count("unknown"), 0);
+    }
+
+    #[test]
+    fn test_last_access() {
+        let mut at = AccessTracker::new();
+        at.record_access("cid1", 100);
+        at.record_access("cid1", 300);
+        at.record_access("cid1", 200);
+        assert_eq!(at.get_last_access("cid1"), Some(300));
+        assert_eq!(at.get_last_access("unknown"), None);
+    }
+
+    #[test]
+    fn test_suggest_tier_hot() {
+        let mut at = AccessTracker::new();
+        let now = 1000;
+        // 10+ accesses, last within 1 hour
+        for i in 0..10 {
+            at.record_access("hot", now - i);
+        }
+        assert_eq!(at.suggest_tier("hot", now), DataTier::Hot);
+    }
+
+    #[test]
+    fn test_suggest_tier_warm() {
+        let mut at = AccessTracker::new();
+        let now = 100_000;
+        for i in 0..3 {
+            at.record_access("warm", now - i * 100);
+        }
+        assert_eq!(at.suggest_tier("warm", now), DataTier::Warm);
+    }
+
+    #[test]
+    fn test_suggest_tier_cold() {
+        let mut at = AccessTracker::new();
+        let now = 500_000;
+        at.record_access("cold", now - 100_000); // 100k secs ago (~1 day)
+        assert_eq!(at.suggest_tier("cold", now), DataTier::Cold);
+    }
+
+    #[test]
+    fn test_suggest_tier_archive() {
+        let mut at = AccessTracker::new();
+        let now = 1_000_000;
+        at.record_access("old", 1); // Very old
+        assert_eq!(at.suggest_tier("old", now), DataTier::Archive);
+    }
+
+    #[test]
+    fn test_suggest_tier_never_accessed() {
+        let at = AccessTracker::new();
+        // Never accessed: last=0, age=current_time-0=current_time
+        // At time 1000: age=1000 < 604_800 (7 days), so Cold
+        assert_eq!(at.suggest_tier("never", 1000), DataTier::Cold);
+        // At time 700_000: age=700_000 > 604_800, so Archive
+        assert_eq!(at.suggest_tier("never", 700_000), DataTier::Archive);
+    }
+
+    #[test]
+    fn test_clear_and_tracked_count() {
+        let mut at = AccessTracker::new();
+        at.record_access("a", 1);
+        at.record_access("b", 2);
+        assert_eq!(at.tracked_count(), 2);
+        at.clear("a");
+        assert_eq!(at.tracked_count(), 1);
+        assert_eq!(at.get_access_count("a"), 0);
+    }
+}

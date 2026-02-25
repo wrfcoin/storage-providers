@@ -62,13 +62,9 @@ impl ArweaveStorageProvider {
         }
     }
 
-    /// Compute a simple hash for transaction ID generation.
+    /// Compute a content hash using SHA-256.
     fn compute_hash(data: &[u8]) -> String {
-        let mut hash: u64 = 5381;
-        for &byte in data {
-            hash = hash.wrapping_mul(33).wrapping_add(byte as u64);
-        }
-        format!("ar{:016x}", hash)
+        wrfcoin_storage_common::hashing::arweave_content_id(data).hash
     }
 
     /// Estimate the cost in AR for storing the given number of bytes.
@@ -86,7 +82,14 @@ impl ArweaveStorageProvider {
 #[async_trait]
 impl StorageProvider for ArweaveStorageProvider {
     async fn store(&self, data: &[u8], metadata: &Metadata) -> Result<ContentId, StorageError> {
-        let cost = Self::estimate_cost(data.len() as u64);
+        // Optionally compress data before storing.
+        let store_data = if self.config.compression_enabled {
+            wrfcoin_storage_common::compression::compress(data)?
+        } else {
+            data.to_vec()
+        };
+
+        let cost = Self::estimate_cost(store_data.len() as u64);
         if cost > self.config.max_cost_ar {
             return Err(StorageError::CostExceeded(format!(
                 "estimated cost {cost:.6} AR exceeds max {:.6} AR",
@@ -94,6 +97,7 @@ impl StorageProvider for ArweaveStorageProvider {
             )));
         }
 
+        // Hash the original uncompressed data for deterministic CIDs.
         let hash = Self::compute_hash(data);
         let content_id = ContentId {
             provider: "arweave".to_string(),
@@ -115,7 +119,7 @@ impl StorageProvider for ArweaveStorageProvider {
             .map_err(|e| StorageError::ProviderError(format!("lock poisoned: {e}")))?;
 
         inner.transactions.insert(hash.clone(), transaction);
-        inner.cache.insert(hash, data.to_vec());
+        inner.cache.insert(hash, store_data);
         inner.stats.total_stored += 1;
         inner.stats.total_bytes += data.len() as u64;
 
@@ -142,7 +146,14 @@ impl StorageProvider for ArweaveStorageProvider {
             Some(bytes) => {
                 inner.stats.total_retrieved += 1;
                 inner.stats.cache_hits += 1;
-                Ok(bytes)
+                // Decompress if the stored data has gzip magic bytes.
+                if wrfcoin_storage_common::compression::is_compressed(&bytes) {
+                    let decompressed =
+                        wrfcoin_storage_common::compression::decompress(&bytes)?;
+                    Ok(decompressed)
+                } else {
+                    Ok(bytes)
+                }
             }
             None => {
                 inner.stats.cache_misses += 1;

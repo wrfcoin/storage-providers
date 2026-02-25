@@ -147,3 +147,224 @@ impl DataTieringOrchestrator {
         &self.tier_config
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use std::sync::Mutex;
+    use wrfcoin_storage_common::HealthStatus;
+
+    /// A minimal in-memory provider for orchestrator testing.
+    struct MockProvider {
+        name: String,
+        inner: Mutex<MockInner>,
+    }
+
+    struct MockInner {
+        data: HashMap<String, Vec<u8>>,
+        stats: StorageStats,
+    }
+
+    impl MockProvider {
+        fn new(name: &str) -> Self {
+            Self {
+                name: name.to_string(),
+                inner: Mutex::new(MockInner {
+                    data: HashMap::new(),
+                    stats: StorageStats::default(),
+                }),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl StorageProvider for MockProvider {
+        async fn store(
+            &self,
+            data: &[u8],
+            _metadata: &Metadata,
+        ) -> Result<ContentId, StorageError> {
+            let hash = format!("{:x}", md5_like_hash(data));
+            let cid = ContentId {
+                provider: self.name.clone(),
+                hash: hash.clone(),
+            };
+            let mut inner = self.inner.lock().unwrap();
+            inner.data.insert(hash, data.to_vec());
+            inner.stats.total_stored += 1;
+            inner.stats.total_bytes += data.len() as u64;
+            Ok(cid)
+        }
+
+        async fn retrieve(&self, id: &ContentId) -> Result<Vec<u8>, StorageError> {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.data.get(&id.hash).cloned() {
+                Some(d) => {
+                    inner.stats.total_retrieved += 1;
+                    Ok(d)
+                }
+                None => Err(StorageError::NotFound(id.to_string())),
+            }
+        }
+
+        async fn exists(&self, id: &ContentId) -> Result<bool, StorageError> {
+            let inner = self.inner.lock().unwrap();
+            Ok(inner.data.contains_key(&id.hash))
+        }
+
+        async fn delete(&self, id: &ContentId) -> Result<(), StorageError> {
+            let mut inner = self.inner.lock().unwrap();
+            inner.data.remove(&id.hash);
+            Ok(())
+        }
+
+        async fn health_check(&self) -> Result<HealthStatus, StorageError> {
+            Ok(HealthStatus {
+                healthy: true,
+                provider: self.name.clone(),
+                latency_ms: Some(1),
+                message: None,
+            })
+        }
+
+        async fn stats(&self) -> Result<StorageStats, StorageError> {
+            let inner = self.inner.lock().unwrap();
+            Ok(inner.stats.clone())
+        }
+    }
+
+    /// Simple hash for deterministic test CIDs.
+    fn md5_like_hash(data: &[u8]) -> u64 {
+        let mut h: u64 = 5381;
+        for &b in data {
+            h = h.wrapping_mul(33).wrapping_add(b as u64);
+        }
+        h
+    }
+
+    fn test_metadata() -> Metadata {
+        Metadata {
+            content_type: "application/octet-stream".to_string(),
+            size: 0,
+            timestamp: 1000,
+            tags: HashMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_store_with_tier() {
+        let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
+        orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
+        let cid = orch
+            .store_with_tier(&DataTier::Hot, b"weather data", &test_metadata())
+            .await
+            .unwrap();
+        assert_eq!(cid.provider, "hot");
+    }
+
+    #[tokio::test]
+    async fn test_store_no_provider_for_tier() {
+        let orch = DataTieringOrchestrator::new(TieringConfig::default());
+        let result = orch
+            .store_with_tier(&DataTier::Hot, b"data", &test_metadata())
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_retrieve_auto_searches_tiers() {
+        let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
+        orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
+        orch.register_tier(DataTier::Cold, Box::new(MockProvider::new("cold")));
+
+        // Store only in Cold tier.
+        let cid = orch
+            .store_with_tier(&DataTier::Cold, b"cold data", &test_metadata())
+            .await
+            .unwrap();
+
+        // retrieve_auto should find it even though Hot is checked first.
+        let data = orch.retrieve_auto(&cid).await.unwrap();
+        assert_eq!(data, b"cold data");
+    }
+
+    #[tokio::test]
+    async fn test_retrieve_auto_not_found() {
+        let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
+        orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
+        let missing = ContentId {
+            provider: "hot".to_string(),
+            hash: "nonexistent".to_string(),
+        };
+        let result = orch.retrieve_auto(&missing).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_promote() {
+        let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
+        orch.register_tier(DataTier::Cold, Box::new(MockProvider::new("cold")));
+        orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
+
+        let cold_cid = orch
+            .store_with_tier(&DataTier::Cold, b"promote me", &test_metadata())
+            .await
+            .unwrap();
+
+        let hot_cid = orch
+            .promote(&cold_cid, &DataTier::Cold, &DataTier::Hot, &test_metadata())
+            .await
+            .unwrap();
+
+        assert_eq!(hot_cid.provider, "hot");
+        // Data should now be in Hot tier.
+        let data = orch
+            .store_with_tier(&DataTier::Hot, b"", &test_metadata())
+            .await;
+        assert!(data.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_demote_with_delete() {
+        let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
+        orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
+        orch.register_tier(DataTier::Cold, Box::new(MockProvider::new("cold")));
+
+        let hot_cid = orch
+            .store_with_tier(&DataTier::Hot, b"demote me", &test_metadata())
+            .await
+            .unwrap();
+
+        let cold_cid = orch
+            .demote(
+                &hot_cid,
+                &DataTier::Hot,
+                &DataTier::Cold,
+                &test_metadata(),
+                true,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(cold_cid.provider, "cold");
+    }
+
+    #[tokio::test]
+    async fn test_aggregate_stats() {
+        let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
+        orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
+        orch.register_tier(DataTier::Cold, Box::new(MockProvider::new("cold")));
+
+        orch.store_with_tier(&DataTier::Hot, b"aaaa", &test_metadata())
+            .await
+            .unwrap();
+        orch.store_with_tier(&DataTier::Cold, b"bbbbbb", &test_metadata())
+            .await
+            .unwrap();
+
+        let stats = orch.aggregate_stats().await.unwrap();
+        assert_eq!(stats.total_stored, 2);
+        assert_eq!(stats.total_bytes, 10); // 4 + 6
+    }
+}

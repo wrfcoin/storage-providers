@@ -63,3 +63,60 @@ impl PinManager {
         self.total_pinned_bytes
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pin_all_strategy() {
+        let pm = PinManager::new(PinningStrategy::PinAll);
+        assert!(pm.should_pin(1_000_000, 0));
+        assert!(pm.should_pin(0, 0));
+    }
+
+    #[test]
+    fn test_frequency_based_strategy() {
+        let pm = PinManager::new(PinningStrategy::FrequencyBased { min_access: 5 });
+        assert!(!pm.should_pin(100, 3));
+        assert!(pm.should_pin(100, 5));
+        assert!(pm.should_pin(100, 10));
+    }
+
+    #[test]
+    fn test_size_based_strategy() {
+        let mut pm = PinManager::new(PinningStrategy::SizeBased { max_bytes: 1000 });
+        assert!(pm.should_pin(500, 0));
+        pm.record_pin(800);
+        assert!(!pm.should_pin(500, 0)); // 800 + 500 > 1000
+        assert!(pm.should_pin(200, 0));  // 800 + 200 = 1000
+    }
+
+    #[test]
+    fn test_smart_strategy() {
+        let pm = PinManager::new(PinningStrategy::Smart);
+        // Needs > 2 accesses AND < 100 MiB
+        assert!(!pm.should_pin(100, 0)); // too few accesses
+        assert!(!pm.should_pin(100, 2)); // exactly 2, need > 2
+        assert!(pm.should_pin(100, 3));  // good
+        assert!(!pm.should_pin(200 * 1024 * 1024, 5)); // too large
+    }
+
+    #[test]
+    fn test_record_pin_unpin() {
+        let mut pm = PinManager::new(PinningStrategy::PinAll);
+        pm.record_pin(500);
+        pm.record_pin(300);
+        assert_eq!(pm.total_pinned_bytes(), 800);
+        pm.record_unpin(200);
+        assert_eq!(pm.total_pinned_bytes(), 600);
+    }
+
+    #[test]
+    fn test_unpin_saturating() {
+        let mut pm = PinManager::new(PinningStrategy::PinAll);
+        pm.record_pin(100);
+        pm.record_unpin(500); // More than pinned
+        assert_eq!(pm.total_pinned_bytes(), 0);
+    }
+}

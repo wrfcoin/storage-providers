@@ -9,5 +9,11 @@ description = "IPFS storage provider for WRFCoin weather data"
 [dependencies]
 wrfcoin-storage-common = { path = "../storage-common" }
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
+reqwest.workspace = true
+lru.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

@@ -11,3 +11,6 @@ wrfcoin-storage-common = { path = "../storage-common" }
 serde.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

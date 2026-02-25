@@ -13,6 +13,10 @@ pub struct IpfsConfig {
     pub max_connections: u32,
     /// Whether to pin content by default after adding.
     pub pin_by_default: bool,
+    /// Maximum number of entries in the LRU cache.
+    pub cache_capacity: usize,
+    /// Time-to-live for cache entries in seconds.
+    pub cache_ttl_secs: u64,
 }
 
 impl Default for IpfsConfig {
@@ -23,6 +27,8 @@ impl Default for IpfsConfig {
             timeout_secs: 30,
             max_connections: 10,
             pin_by_default: true,
+            cache_capacity: 10_000,
+            cache_ttl_secs: 3600,
         }
     }
 }

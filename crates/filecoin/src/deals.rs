@@ -118,3 +118,68 @@ impl Default for DealManager {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_propose_deal() {
+        let mut dm = DealManager::new();
+        let id = dm.propose_deal(
+            "miner-1".to_string(),
+            "client-1".to_string(),
+            "QmData".to_string(),
+            1024,
+            100,
+            1000,
+        );
+        assert_eq!(id, "deal-1");
+        assert_eq!(dm.list_deals().len(), 1);
+        assert_eq!(dm.list_deals()[0].status, DealStatus::Proposed);
+    }
+
+    #[test]
+    fn test_deal_id_auto_increment() {
+        let mut dm = DealManager::new();
+        let id1 = dm.propose_deal("m".into(), "c".into(), "d1".into(), 100, 10, 500);
+        let id2 = dm.propose_deal("m".into(), "c".into(), "d2".into(), 200, 20, 500);
+        assert_eq!(id1, "deal-1");
+        assert_eq!(id2, "deal-2");
+    }
+
+    #[test]
+    fn test_check_deal_status() {
+        let mut dm = DealManager::new();
+        let id = dm.propose_deal("m".into(), "c".into(), "d".into(), 100, 10, 500);
+        assert_eq!(dm.check_deal_status(&id), Some(&DealStatus::Proposed));
+        assert_eq!(dm.check_deal_status("nonexistent"), None);
+    }
+
+    #[test]
+    fn test_renew_deal() {
+        let mut dm = DealManager::new();
+        let id = dm.propose_deal("miner".into(), "client".into(), "data".into(), 1024, 50, 1000);
+        let new_id = dm.renew_deal(&id).unwrap();
+        assert_eq!(new_id, "deal-2");
+        assert_eq!(dm.list_deals().len(), 2);
+        // Renewed deal has same params
+        let renewed = &dm.list_deals()[1];
+        assert_eq!(renewed.miner, "miner");
+        assert_eq!(renewed.data_cid, "data");
+    }
+
+    #[test]
+    fn test_renew_nonexistent_deal() {
+        let mut dm = DealManager::new();
+        assert_eq!(dm.renew_deal("nope"), None);
+    }
+
+    #[test]
+    fn test_list_deals() {
+        let mut dm = DealManager::new();
+        assert!(dm.list_deals().is_empty());
+        dm.propose_deal("m".into(), "c".into(), "d".into(), 100, 10, 500);
+        assert_eq!(dm.list_deals().len(), 1);
+    }
+}
