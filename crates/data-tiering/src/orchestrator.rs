@@ -3,12 +3,33 @@ use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use wrfcoin_storage_common::{
-    AdmissionDecision, AvailabilitySlaStatus, ContentId, DataTier, Metadata, ProvenanceChain,
-    ProvenanceValidationResult, PublicInterestAvailabilityPolicy, QuarantineRecord, StorageError,
-    StorageProvider, StorageStats,
+    AdmissionDecision, AvailabilitySlaStatus, ContentId, DataTier, EnvironmentalReport, Metadata,
+    ProvenanceChain, ProvenanceValidationResult, PublicInterestAvailabilityPolicy, QuarantineRecord,
+    StorageError, StorageProvider, StorageStats,
 };
 
 use crate::tiers::TieringConfig;
+
+/// Policy that governs what provenance chains are considered acceptable at ingest.
+#[derive(Debug, Clone)]
+pub struct ProvenancePolicy {
+    /// If true, content without a provenance chain is rejected outright.
+    pub require_provenance: bool,
+    /// Minimum number of links required in the chain (0 = no minimum).
+    pub min_chain_length: usize,
+    /// Accepted signature algorithms. An empty list means all algorithms are allowed.
+    pub allowed_algorithms: Vec<String>,
+}
+
+impl Default for ProvenancePolicy {
+    fn default() -> Self {
+        Self {
+            require_provenance: true,
+            min_chain_length: 1,
+            allowed_algorithms: Vec::new(),
+        }
+    }
+}
 
 /// Orchestrates storage across multiple tiers (hot/warm/cold/archive).
 ///
@@ -19,6 +40,7 @@ pub struct DataTieringOrchestrator {
     tier_config: TieringConfig,
     quarantine_records: Arc<RwLock<HashMap<String, QuarantineRecord>>>,
     public_interest_policies: Arc<RwLock<HashMap<String, PublicInterestAvailabilityPolicy>>>,
+    provenance_policy: Arc<RwLock<ProvenancePolicy>>,
 }
 
 #[derive(Debug, Clone)]
@@ -38,6 +60,7 @@ impl DataTieringOrchestrator {
             tier_config,
             quarantine_records: Arc::new(RwLock::new(HashMap::new())),
             public_interest_policies: Arc::new(RwLock::new(HashMap::new())),
+            provenance_policy: Arc::new(RwLock::new(ProvenancePolicy::default())),
         }
     }
 
@@ -258,6 +281,144 @@ impl DataTieringOrchestrator {
         };
 
         Ok((AdmissionDecision::Quarantined, quarantine_store))
+    }
+
+    /// Replace the active provenance policy.
+    pub fn set_provenance_policy(&self, policy: ProvenancePolicy) {
+        let mut guard = self.provenance_policy.write().unwrap();
+        *guard = policy;
+    }
+
+    /// Validate `chain` against the active `ProvenancePolicy` in addition to
+    /// structural chain integrity.
+    ///
+    /// Returns `Ok(())` when the chain satisfies all policy constraints,
+    /// otherwise `Err` with a human-readable reason.
+    fn validate_chain_with_policy(&self, chain: &ProvenanceChain) -> Result<(), String> {
+        // Structural integrity first.
+        let result = self.validate_provenance_chain(chain);
+        if !result.valid {
+            return Err(result.reason);
+        }
+
+        let policy = self.provenance_policy.read().unwrap();
+
+        // Minimum chain length.
+        if chain.links.len() < policy.min_chain_length {
+            return Err(format!(
+                "provenance chain has {} links but policy requires at least {}",
+                chain.links.len(),
+                policy.min_chain_length
+            ));
+        }
+
+        // Allowed algorithms (empty list = allow all).
+        if !policy.allowed_algorithms.is_empty() {
+            for link in &chain.links {
+                if !policy.allowed_algorithms.contains(&link.algorithm) {
+                    return Err(format!(
+                        "algorithm '{}' is not in the allowed algorithms list",
+                        link.algorithm
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Store data with provenance enforcement according to the active policy.
+    ///
+    /// * `None` provenance → `Rejected` (when `require_provenance` is true)
+    /// * Invalid chain → `Quarantined` with detailed reason
+    /// * Valid chain → data stored in `tier`, returns `Accepted`
+    pub async fn store_with_provenance_enforcement(
+        &self,
+        data: &[u8],
+        metadata: &Metadata,
+        tier: &DataTier,
+        provenance_chain: Option<&ProvenanceChain>,
+    ) -> Result<AdmissionDecision, StorageError> {
+        let require = self.provenance_policy.read().unwrap().require_provenance;
+
+        let chain = match provenance_chain {
+            Some(c) => c,
+            None => {
+                if require {
+                    return Ok(AdmissionDecision::Rejected);
+                }
+                // Policy does not require provenance — store without it.
+                self.store_with_tier(tier, data, metadata).await?;
+                return Ok(AdmissionDecision::Accepted);
+            }
+        };
+
+        match self.validate_chain_with_policy(chain) {
+            Ok(()) => {
+                self.store_with_tier(tier, data, metadata).await?;
+                Ok(AdmissionDecision::Accepted)
+            }
+            Err(reason) => {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let quarantine_id = format!("q-{}-{}", now, chain.chain_id);
+                {
+                    let mut guard = self.quarantine_records.write().unwrap();
+                    guard.insert(
+                        quarantine_id.clone(),
+                        QuarantineRecord {
+                            quarantine_id: quarantine_id.clone(),
+                            reason: reason.clone(),
+                            detected_at: now,
+                            review_required: true,
+                            reinstated: false,
+                        },
+                    );
+                }
+                Ok(AdmissionDecision::Quarantined)
+            }
+        }
+    }
+
+    /// Store a validated `EnvironmentalReport` with provenance enforcement.
+    ///
+    /// Steps:
+    /// 1. `report.validate()` — structural report validation.
+    /// 2. Require `report.provenance` to be `Some`.
+    /// 3. Serialize and store with `store_with_provenance_enforcement`.
+    pub async fn store_environmental_report(
+        &self,
+        report: &EnvironmentalReport,
+        tier: DataTier,
+    ) -> Result<AdmissionDecision, StorageError> {
+        // Validate report structure.
+        if let Err(reason) = report.validate() {
+            return Err(StorageError::InvalidData(reason));
+        }
+
+        let provenance = report.provenance.as_ref();
+
+        // Serialize the report to bytes.
+        let bytes = serde_json::to_vec(report)
+            .map_err(|e| StorageError::InvalidData(format!("report serialization failed: {e}")))?;
+
+        let metadata = Metadata {
+            content_type: "application/json".to_string(),
+            size: bytes.len() as u64,
+            timestamp: report.submitted_at,
+            tags: {
+                let mut t = std::collections::HashMap::new();
+                t.insert("domain".to_string(), format!("{:?}", report.domain));
+                t.insert("station_id".to_string(), report.station_id.clone());
+                t.insert("report_id".to_string(), report.report_id.clone());
+                t
+            },
+        };
+
+        self.store_with_provenance_enforcement(&bytes, &metadata, &tier, provenance)
+            .await
     }
 
     /// Return quarantine records for synthetic-content review workflows.
@@ -639,5 +800,236 @@ mod tests {
         assert_eq!(result.replicated_content_ids.len(), 3);
         assert!(result.sla.sla_met);
         assert!(result.sla.read_failover_ready);
+    }
+
+    // ---- store_with_provenance_enforcement tests ----
+
+    #[tokio::test]
+    async fn test_provenance_enforcement_valid_chain_accepted() {
+        let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
+        orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
+
+        let decision = orch
+            .store_with_provenance_enforcement(
+                b"good data",
+                &test_metadata(),
+                &DataTier::Hot,
+                Some(&valid_chain()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(decision, AdmissionDecision::Accepted);
+    }
+
+    #[tokio::test]
+    async fn test_provenance_enforcement_invalid_chain_quarantined() {
+        let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
+        orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
+
+        let bad_chain = ProvenanceChain {
+            chain_id: "bad-chain".to_string(),
+            root_hash: "root".to_string(),
+            links: vec![wrfcoin_storage_common::ProvenanceLink {
+                artifact_hash: "wrong-hash".to_string(),
+                parent_hash: None,
+                signer: "signer".to_string(),
+                signature: "sig".to_string(),
+                algorithm: "ed25519".to_string(),
+                signed_at: 1,
+            }],
+        };
+
+        let decision = orch
+            .store_with_provenance_enforcement(
+                b"bad data",
+                &test_metadata(),
+                &DataTier::Hot,
+                Some(&bad_chain),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(decision, AdmissionDecision::Quarantined);
+        assert_eq!(orch.list_quarantine_records().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_provenance_enforcement_missing_provenance_rejected() {
+        let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
+        orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
+        // Default policy requires provenance.
+
+        let decision = orch
+            .store_with_provenance_enforcement(
+                b"no provenance",
+                &test_metadata(),
+                &DataTier::Hot,
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(decision, AdmissionDecision::Rejected);
+    }
+
+    #[tokio::test]
+    async fn test_provenance_enforcement_policy_min_chain_length() {
+        let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
+        orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
+
+        // Require at least 3 links; valid_chain only has 2.
+        orch.set_provenance_policy(ProvenancePolicy {
+            require_provenance: true,
+            min_chain_length: 3,
+            allowed_algorithms: Vec::new(),
+        });
+
+        let decision = orch
+            .store_with_provenance_enforcement(
+                b"data",
+                &test_metadata(),
+                &DataTier::Hot,
+                Some(&valid_chain()),
+            )
+            .await
+            .unwrap();
+
+        // Chain is structurally valid but too short — should be quarantined.
+        assert_eq!(decision, AdmissionDecision::Quarantined);
+    }
+
+    #[tokio::test]
+    async fn test_provenance_enforcement_policy_allowed_algorithms() {
+        let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
+        orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
+
+        // Only allow secp256k1 — valid_chain uses ed25519, so it should fail.
+        orch.set_provenance_policy(ProvenancePolicy {
+            require_provenance: true,
+            min_chain_length: 1,
+            allowed_algorithms: vec!["secp256k1".to_string()],
+        });
+
+        let decision = orch
+            .store_with_provenance_enforcement(
+                b"data",
+                &test_metadata(),
+                &DataTier::Hot,
+                Some(&valid_chain()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(decision, AdmissionDecision::Quarantined);
+    }
+
+    #[tokio::test]
+    async fn test_provenance_enforcement_optional_provenance_without_chain_accepted() {
+        let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
+        orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
+
+        // Disable requirement so None provenance is allowed.
+        orch.set_provenance_policy(ProvenancePolicy {
+            require_provenance: false,
+            min_chain_length: 0,
+            allowed_algorithms: Vec::new(),
+        });
+
+        let decision = orch
+            .store_with_provenance_enforcement(
+                b"data without provenance",
+                &test_metadata(),
+                &DataTier::Hot,
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(decision, AdmissionDecision::Accepted);
+    }
+
+    // ---- store_environmental_report tests ----
+
+    fn sample_env_report_with_provenance() -> wrfcoin_storage_common::EnvironmentalReport {
+        use wrfcoin_storage_common::{
+            EnvironmentalDomain, EnvironmentalReport, GeoLocation, ProvenanceChain, ReportPayload,
+            WeatherPayload,
+        };
+
+        EnvironmentalReport {
+            report_id: "env-001".to_string(),
+            domain: EnvironmentalDomain::Weather,
+            station_id: "stn-env-1".to_string(),
+            location: GeoLocation { latitude: 45.0, longitude: -90.0, altitude_m: None },
+            observed_at: 9_000_000,
+            submitted_at: 9_000_001,
+            payload: ReportPayload::Weather(WeatherPayload {
+                temperature_c: Some(18.0),
+                humidity_pct: Some(70.0),
+                pressure_hpa: None,
+                wind_speed_ms: None,
+                wind_direction_deg: None,
+                precipitation_mm: None,
+                visibility_m: None,
+            }),
+            quality_score: Some(0.9),
+            provenance: Some(ProvenanceChain {
+                chain_id: "chain-env".to_string(),
+                root_hash: "root".to_string(),
+                links: vec![
+                    wrfcoin_storage_common::ProvenanceLink {
+                        artifact_hash: "root".to_string(),
+                        parent_hash: None,
+                        signer: "signer-1".to_string(),
+                        signature: "sig-1".to_string(),
+                        algorithm: "ed25519".to_string(),
+                        signed_at: 10,
+                    },
+                ],
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_store_environmental_report_accepted() {
+        let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
+        orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
+
+        let report = sample_env_report_with_provenance();
+        let decision = orch
+            .store_environmental_report(&report, DataTier::Hot)
+            .await
+            .unwrap();
+
+        assert_eq!(decision, AdmissionDecision::Accepted);
+    }
+
+    #[tokio::test]
+    async fn test_store_environmental_report_missing_provenance_rejected() {
+        let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
+        orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
+
+        let mut report = sample_env_report_with_provenance();
+        report.provenance = None;
+
+        let decision = orch
+            .store_environmental_report(&report, DataTier::Hot)
+            .await
+            .unwrap();
+
+        assert_eq!(decision, AdmissionDecision::Rejected);
+    }
+
+    #[tokio::test]
+    async fn test_store_environmental_report_invalid_report_errors() {
+        let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
+        orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
+
+        let mut report = sample_env_report_with_provenance();
+        report.report_id = "".to_string(); // triggers validation failure
+
+        let result = orch.store_environmental_report(&report, DataTier::Hot).await;
+        assert!(result.is_err());
     }
 }

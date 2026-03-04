@@ -9,6 +9,7 @@ description = "Hot/warm/cold data tiering orchestrator for WRFCoin storage"
 [dependencies]
 wrfcoin-storage-common = { path = "../storage-common" }
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
 
