@@ -25,6 +25,12 @@ crates/
 | Cold | Filecoin | Minutes | Historical datasets with storage deals |
 | Archive | Arweave | Minutes | Permanent climate records |
 
+## Resilience Extensions
+
+- Provenance-chain enforcement is validated before acceptance (`storage-providers#9`).
+- Invalid or synthetic-suspicious artifacts are routed into quarantine metadata flow (`storage-providers#7`).
+- Public-interest classes can be replicated with explicit minimum replica SLA tracking (`storage-providers#10`).
+
 ## Development
 
 ```bash
