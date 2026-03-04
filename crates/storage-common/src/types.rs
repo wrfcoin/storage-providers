@@ -85,6 +85,77 @@ pub enum DataTier {
     Archive,
 }
 
+/// Signed provenance step binding an artifact hash to its parent lineage.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProvenanceLink {
+    /// Artifact hash for the current step.
+    pub artifact_hash: String,
+    /// Parent artifact hash (if present).
+    pub parent_hash: Option<String>,
+    /// Signer identity for this link.
+    pub signer: String,
+    /// Signature over the link payload.
+    pub signature: String,
+    /// Signature algorithm descriptor.
+    pub algorithm: String,
+    /// Unix timestamp of signature creation.
+    pub signed_at: u64,
+}
+
+/// Provenance chain attached to incoming artifacts.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProvenanceChain {
+    /// Stable chain identifier.
+    pub chain_id: String,
+    /// Root hash expected at the chain head.
+    pub root_hash: String,
+    /// Ordered links from root -> artifact.
+    pub links: Vec<ProvenanceLink>,
+}
+
+/// Result of provenance verification.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProvenanceValidationResult {
+    pub valid: bool,
+    pub reason: String,
+    pub invalid_links: usize,
+}
+
+/// Routing decision used by ingestion logic.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AdmissionDecision {
+    Accepted,
+    Quarantined,
+    Rejected,
+}
+
+/// Quarantine metadata for suspicious/synthetic content.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QuarantineRecord {
+    pub quarantine_id: String,
+    pub reason: String,
+    pub detected_at: u64,
+    pub review_required: bool,
+    pub reinstated: bool,
+}
+
+/// Availability policy for public-interest report classes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PublicInterestAvailabilityPolicy {
+    pub class: String,
+    pub min_replicas: u8,
+}
+
+/// SLA status for public-interest availability.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AvailabilitySlaStatus {
+    pub class: String,
+    pub target_replicas: u8,
+    pub replicated_replicas: u8,
+    pub read_failover_ready: bool,
+    pub sla_met: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +231,38 @@ mod tests {
         let tiers = [DataTier::Hot, DataTier::Warm, DataTier::Cold, DataTier::Archive];
         assert_eq!(tiers.len(), 4);
         assert_ne!(DataTier::Hot, DataTier::Cold);
+    }
+
+    #[test]
+    fn test_provenance_chain_roundtrip() {
+        let chain = ProvenanceChain {
+            chain_id: "chain-a".to_string(),
+            root_hash: "abc".to_string(),
+            links: vec![ProvenanceLink {
+                artifact_hash: "abc".to_string(),
+                parent_hash: None,
+                signer: "signer-1".to_string(),
+                signature: "sig".to_string(),
+                algorithm: "ed25519".to_string(),
+                signed_at: 123,
+            }],
+        };
+        let json = serde_json::to_string(&chain).expect("serialize chain");
+        let decoded: ProvenanceChain = serde_json::from_str(&json).expect("deserialize chain");
+        assert_eq!(decoded.chain_id, "chain-a");
+        assert_eq!(decoded.links.len(), 1);
+    }
+
+    #[test]
+    fn test_availability_sla_status() {
+        let status = AvailabilitySlaStatus {
+            class: "public_interest.weather".to_string(),
+            target_replicas: 3,
+            replicated_replicas: 2,
+            read_failover_ready: true,
+            sla_met: false,
+        };
+        assert_eq!(status.class, "public_interest.weather");
+        assert!(!status.sla_met);
     }
 }

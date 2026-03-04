@@ -1,7 +1,11 @@
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use wrfcoin_storage_common::{
-    ContentId, DataTier, Metadata, StorageError, StorageProvider, StorageStats,
+    AdmissionDecision, AvailabilitySlaStatus, ContentId, DataTier, Metadata, ProvenanceChain,
+    ProvenanceValidationResult, PublicInterestAvailabilityPolicy, QuarantineRecord, StorageError,
+    StorageProvider, StorageStats,
 };
 
 use crate::tiers::TieringConfig;
@@ -13,6 +17,15 @@ use crate::tiers::TieringConfig;
 pub struct DataTieringOrchestrator {
     tiers: HashMap<DataTier, Box<dyn StorageProvider>>,
     tier_config: TieringConfig,
+    quarantine_records: Arc<RwLock<HashMap<String, QuarantineRecord>>>,
+    public_interest_policies: Arc<RwLock<HashMap<String, PublicInterestAvailabilityPolicy>>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PublicInterestStoreResult {
+    pub class: String,
+    pub replicated_content_ids: Vec<ContentId>,
+    pub sla: AvailabilitySlaStatus,
 }
 
 impl DataTieringOrchestrator {
@@ -23,6 +36,8 @@ impl DataTieringOrchestrator {
         Self {
             tiers: HashMap::new(),
             tier_config,
+            quarantine_records: Arc::new(RwLock::new(HashMap::new())),
+            public_interest_policies: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -146,6 +161,188 @@ impl DataTieringOrchestrator {
     pub fn config(&self) -> &TieringConfig {
         &self.tier_config
     }
+
+    /// Verify provenance chain integrity for accepted content.
+    pub fn validate_provenance_chain(&self, chain: &ProvenanceChain) -> ProvenanceValidationResult {
+        if chain.chain_id.trim().is_empty() || chain.root_hash.trim().is_empty() {
+            return ProvenanceValidationResult {
+                valid: false,
+                reason: "chain_id and root_hash are required".to_string(),
+                invalid_links: chain.links.len(),
+            };
+        }
+
+        if chain.links.is_empty() {
+            return ProvenanceValidationResult {
+                valid: false,
+                reason: "at least one provenance link is required".to_string(),
+                invalid_links: 1,
+            };
+        }
+
+        let mut invalid_links = 0usize;
+        for (idx, link) in chain.links.iter().enumerate() {
+            if link.artifact_hash.trim().is_empty()
+                || link.signer.trim().is_empty()
+                || link.signature.trim().is_empty()
+                || link.algorithm.trim().is_empty()
+            {
+                invalid_links += 1;
+                continue;
+            }
+
+            if idx == 0 {
+                if link.artifact_hash != chain.root_hash {
+                    invalid_links += 1;
+                }
+            } else {
+                let prev = &chain.links[idx - 1];
+                if link.parent_hash.as_deref() != Some(prev.artifact_hash.as_str()) {
+                    invalid_links += 1;
+                }
+            }
+        }
+
+        if invalid_links > 0 {
+            return ProvenanceValidationResult {
+                valid: false,
+                reason: "provenance chain continuity/signature metadata failed validation".to_string(),
+                invalid_links,
+            };
+        }
+
+        ProvenanceValidationResult {
+            valid: true,
+            reason: "valid provenance chain".to_string(),
+            invalid_links: 0,
+        }
+    }
+
+    /// Store content with provenance-first enforcement. Invalid chains are quarantined.
+    pub async fn store_verified_with_tier(
+        &self,
+        tier: &DataTier,
+        data: &[u8],
+        metadata: &Metadata,
+        chain: &ProvenanceChain,
+    ) -> Result<(AdmissionDecision, Option<ContentId>), StorageError> {
+        let validation = self.validate_provenance_chain(chain);
+        if validation.valid {
+            let id = self.store_with_tier(tier, data, metadata).await?;
+            return Ok((AdmissionDecision::Accepted, Some(id)));
+        }
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let quarantine_id = format!("q-{}-{}", now, chain.chain_id);
+        {
+            let mut guard = self.quarantine_records.write().unwrap();
+            guard.insert(
+                quarantine_id.clone(),
+                QuarantineRecord {
+                    quarantine_id: quarantine_id.clone(),
+                    reason: validation.reason.clone(),
+                    detected_at: now,
+                    review_required: true,
+                    reinstated: false,
+                },
+            );
+        }
+
+        let quarantine_store = if let Some(provider) = self.tiers.get(&DataTier::Archive) {
+            provider.store(data, metadata).await.ok()
+        } else {
+            None
+        };
+
+        Ok((AdmissionDecision::Quarantined, quarantine_store))
+    }
+
+    /// Return quarantine records for synthetic-content review workflows.
+    pub fn list_quarantine_records(&self) -> Vec<QuarantineRecord> {
+        self.quarantine_records
+            .read()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    /// Mark quarantined content as reinstated following review.
+    pub fn reinstate_quarantine(&self, quarantine_id: &str) -> bool {
+        let mut guard = self.quarantine_records.write().unwrap();
+        let Some(record) = guard.get_mut(quarantine_id) else {
+            return false;
+        };
+        record.reinstated = true;
+        true
+    }
+
+    /// Configure minimum replicas for a public-interest report class.
+    pub fn set_public_interest_policy(&self, class: &str, min_replicas: u8) {
+        let mut guard = self.public_interest_policies.write().unwrap();
+        guard.insert(
+            class.to_string(),
+            PublicInterestAvailabilityPolicy {
+                class: class.to_string(),
+                min_replicas: min_replicas.max(1),
+            },
+        );
+    }
+
+    /// Store public-interest content across tiers and compute SLA status.
+    pub async fn store_public_interest_with_sla(
+        &self,
+        class: &str,
+        data: &[u8],
+        metadata: &Metadata,
+        chain: &ProvenanceChain,
+    ) -> Result<PublicInterestStoreResult, StorageError> {
+        let validation = self.validate_provenance_chain(chain);
+        if !validation.valid {
+            let _ = self
+                .store_verified_with_tier(&DataTier::Archive, data, metadata, chain)
+                .await?;
+            return Err(StorageError::InvalidData(validation.reason));
+        }
+
+        let target_replicas = self
+            .public_interest_policies
+            .read()
+            .unwrap()
+            .get(class)
+            .map(|p| p.min_replicas)
+            .unwrap_or(3);
+
+        let tier_order = [DataTier::Hot, DataTier::Warm, DataTier::Cold, DataTier::Archive];
+        let mut content_ids = Vec::new();
+        for tier in &tier_order {
+            if content_ids.len() >= target_replicas as usize {
+                break;
+            }
+            if self.tiers.contains_key(tier) {
+                let id = self.store_with_tier(tier, data, metadata).await?;
+                content_ids.push(id);
+            }
+        }
+
+        let replicated = content_ids.len() as u8;
+        let sla = AvailabilitySlaStatus {
+            class: class.to_string(),
+            target_replicas,
+            replicated_replicas: replicated,
+            read_failover_ready: replicated > 1,
+            sla_met: replicated >= target_replicas,
+        };
+
+        Ok(PublicInterestStoreResult {
+            class: class.to_string(),
+            replicated_content_ids: content_ids,
+            sla,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -249,6 +446,31 @@ mod tests {
             size: 0,
             timestamp: 1000,
             tags: HashMap::new(),
+        }
+    }
+
+    fn valid_chain() -> ProvenanceChain {
+        ProvenanceChain {
+            chain_id: "chain-1".to_string(),
+            root_hash: "root".to_string(),
+            links: vec![
+                wrfcoin_storage_common::ProvenanceLink {
+                    artifact_hash: "root".to_string(),
+                    parent_hash: None,
+                    signer: "signer-1".to_string(),
+                    signature: "sig-1".to_string(),
+                    algorithm: "ed25519".to_string(),
+                    signed_at: 10,
+                },
+                wrfcoin_storage_common::ProvenanceLink {
+                    artifact_hash: "child-1".to_string(),
+                    parent_hash: Some("root".to_string()),
+                    signer: "signer-2".to_string(),
+                    signature: "sig-2".to_string(),
+                    algorithm: "ed25519".to_string(),
+                    signed_at: 11,
+                },
+            ],
         }
     }
 
@@ -366,5 +588,56 @@ mod tests {
         let stats = orch.aggregate_stats().await.unwrap();
         assert_eq!(stats.total_stored, 2);
         assert_eq!(stats.total_bytes, 10); // 4 + 6
+    }
+
+    #[tokio::test]
+    async fn test_provenance_validation_and_quarantine_flow() {
+        let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
+        orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
+        orch.register_tier(DataTier::Archive, Box::new(MockProvider::new("archive")));
+
+        let invalid = ProvenanceChain {
+            chain_id: "chain-bad".to_string(),
+            root_hash: "root".to_string(),
+            links: vec![wrfcoin_storage_common::ProvenanceLink {
+                artifact_hash: "wrong-root".to_string(),
+                parent_hash: None,
+                signer: "signer".to_string(),
+                signature: "sig".to_string(),
+                algorithm: "ed25519".to_string(),
+                signed_at: 10,
+            }],
+        };
+
+        let (decision, cid) = orch
+            .store_verified_with_tier(&DataTier::Hot, b"bad provenance", &test_metadata(), &invalid)
+            .await
+            .unwrap();
+        assert_eq!(decision, AdmissionDecision::Quarantined);
+        assert!(cid.is_some(), "quarantined content should be persisted in archive when available");
+        assert_eq!(orch.list_quarantine_records().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_public_interest_sla_replication() {
+        let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
+        orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
+        orch.register_tier(DataTier::Warm, Box::new(MockProvider::new("warm")));
+        orch.register_tier(DataTier::Cold, Box::new(MockProvider::new("cold")));
+        orch.set_public_interest_policy("public_interest.weather", 3);
+
+        let result = orch
+            .store_public_interest_with_sla(
+                "public_interest.weather",
+                b"verified public interest report",
+                &test_metadata(),
+                &valid_chain(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.replicated_content_ids.len(), 3);
+        assert!(result.sla.sla_met);
+        assert!(result.sla.read_failover_ready);
     }
 }
