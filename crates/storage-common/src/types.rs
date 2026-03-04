@@ -163,6 +163,9 @@ pub enum EnvironmentalDomain {
     AirQuality,
     WaterQuality,
     Wildfire,
+    Soil,
+    Ocean,
+    Hydrology,
 }
 
 /// Geographic location with optional altitude.
@@ -219,6 +222,47 @@ pub struct WildfirePayload {
     pub active: bool,
 }
 
+/// Soil observation payload.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SoilPayload {
+    pub moisture_pct: Option<f64>,
+    pub temperature_c: Option<f64>,
+    pub ph: Option<f64>,
+    pub organic_carbon_pct: Option<f64>,
+    pub nitrogen_mgl: Option<f64>,
+    pub phosphorus_mgl: Option<f64>,
+    pub potassium_mgl: Option<f64>,
+    pub conductivity_dsm: Option<f64>,
+    pub depth_cm: Option<f64>,
+}
+
+/// Ocean observation payload.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OceanPayload {
+    pub sea_surface_temperature_c: Option<f64>,
+    pub salinity_psu: Option<f64>,
+    pub wave_height_m: Option<f64>,
+    pub wave_period_s: Option<f64>,
+    pub current_speed_ms: Option<f64>,
+    pub current_direction_deg: Option<u16>,
+    pub chlorophyll_a_mgl: Option<f64>,
+    pub dissolved_oxygen_mgl: Option<f64>,
+    pub depth_m: Option<f64>,
+}
+
+/// Hydrology observation payload.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HydrologyPayload {
+    pub river_discharge_m3s: Option<f64>,
+    pub water_level_m: Option<f64>,
+    pub flow_velocity_ms: Option<f64>,
+    pub sediment_load_mgl: Option<f64>,
+    pub groundwater_level_m: Option<f64>,
+    pub reservoir_storage_pct: Option<f64>,
+    pub flood_risk_level: Option<u8>,
+    pub drought_index: Option<f64>,
+}
+
 /// Domain-specific payload variants for environmental reports.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ReportPayload {
@@ -226,6 +270,9 @@ pub enum ReportPayload {
     AirQuality(AirQualityPayload),
     WaterQuality(WaterQualityPayload),
     Wildfire(WildfirePayload),
+    Soil(SoilPayload),
+    Ocean(OceanPayload),
+    Hydrology(HydrologyPayload),
 }
 
 impl ReportPayload {
@@ -236,6 +283,9 @@ impl ReportPayload {
             ReportPayload::AirQuality(_) => EnvironmentalDomain::AirQuality,
             ReportPayload::WaterQuality(_) => EnvironmentalDomain::WaterQuality,
             ReportPayload::Wildfire(_) => EnvironmentalDomain::Wildfire,
+            ReportPayload::Soil(_) => EnvironmentalDomain::Soil,
+            ReportPayload::Ocean(_) => EnvironmentalDomain::Ocean,
+            ReportPayload::Hydrology(_) => EnvironmentalDomain::Hydrology,
         }
     }
 }
@@ -586,6 +636,201 @@ mod tests {
             quality_score: None,
             provenance: None,
         };
+        let err = report.validate().unwrap_err();
+        assert!(err.contains("domain"));
+    }
+
+    // ---- Soil payload tests ----
+
+    fn sample_soil_report() -> EnvironmentalReport {
+        EnvironmentalReport {
+            report_id: "soil-001".to_string(),
+            domain: EnvironmentalDomain::Soil,
+            station_id: "soil-stn-1".to_string(),
+            location: GeoLocation { latitude: 45.0, longitude: -93.0, altitude_m: Some(300.0) },
+            observed_at: 5_000_000,
+            submitted_at: 5_000_001,
+            payload: ReportPayload::Soil(SoilPayload {
+                moisture_pct: Some(32.5),
+                temperature_c: Some(18.0),
+                ph: Some(6.8),
+                organic_carbon_pct: Some(2.1),
+                nitrogen_mgl: Some(15.0),
+                phosphorus_mgl: Some(8.5),
+                potassium_mgl: Some(120.0),
+                conductivity_dsm: Some(0.45),
+                depth_cm: Some(10.0),
+            }),
+            quality_score: Some(0.9),
+            provenance: None,
+        }
+    }
+
+    #[test]
+    fn test_soil_payload_construction() {
+        let report = sample_soil_report();
+        assert_eq!(report.report_id, "soil-001");
+        assert_eq!(report.domain, EnvironmentalDomain::Soil);
+        if let ReportPayload::Soil(ref p) = report.payload {
+            assert_eq!(p.moisture_pct, Some(32.5));
+            assert_eq!(p.ph, Some(6.8));
+            assert_eq!(p.depth_cm, Some(10.0));
+        } else {
+            panic!("expected Soil payload variant");
+        }
+    }
+
+    #[test]
+    fn test_soil_report_serde_roundtrip() {
+        let report = sample_soil_report();
+        let json = serde_json::to_string(&report).expect("serialize soil report");
+        let decoded: EnvironmentalReport = serde_json::from_str(&json).expect("deserialize soil report");
+        assert_eq!(decoded.report_id, report.report_id);
+        assert_eq!(decoded.domain, EnvironmentalDomain::Soil);
+        assert_eq!(decoded.quality_score, report.quality_score);
+    }
+
+    #[test]
+    fn test_soil_report_validate_ok() {
+        let report = sample_soil_report();
+        assert!(report.validate().is_ok());
+    }
+
+    #[test]
+    fn test_soil_domain_payload_mismatch_detection() {
+        let mut report = sample_soil_report();
+        // Switch domain to Ocean while keeping Soil payload
+        report.domain = EnvironmentalDomain::Ocean;
+        let err = report.validate().unwrap_err();
+        assert!(err.contains("domain"));
+    }
+
+    // ---- Ocean payload tests ----
+
+    fn sample_ocean_report() -> EnvironmentalReport {
+        EnvironmentalReport {
+            report_id: "ocean-001".to_string(),
+            domain: EnvironmentalDomain::Ocean,
+            station_id: "buoy-7".to_string(),
+            location: GeoLocation { latitude: 28.5, longitude: -89.2, altitude_m: None },
+            observed_at: 6_000_000,
+            submitted_at: 6_000_001,
+            payload: ReportPayload::Ocean(OceanPayload {
+                sea_surface_temperature_c: Some(28.3),
+                salinity_psu: Some(35.2),
+                wave_height_m: Some(1.8),
+                wave_period_s: Some(9.5),
+                current_speed_ms: Some(0.4),
+                current_direction_deg: Some(180),
+                chlorophyll_a_mgl: Some(0.25),
+                dissolved_oxygen_mgl: Some(7.1),
+                depth_m: Some(0.5),
+            }),
+            quality_score: Some(0.85),
+            provenance: None,
+        }
+    }
+
+    #[test]
+    fn test_ocean_payload_construction() {
+        let report = sample_ocean_report();
+        assert_eq!(report.report_id, "ocean-001");
+        assert_eq!(report.domain, EnvironmentalDomain::Ocean);
+        if let ReportPayload::Ocean(ref p) = report.payload {
+            assert_eq!(p.sea_surface_temperature_c, Some(28.3));
+            assert_eq!(p.salinity_psu, Some(35.2));
+            assert_eq!(p.current_direction_deg, Some(180));
+        } else {
+            panic!("expected Ocean payload variant");
+        }
+    }
+
+    #[test]
+    fn test_ocean_report_serde_roundtrip() {
+        let report = sample_ocean_report();
+        let json = serde_json::to_string(&report).expect("serialize ocean report");
+        let decoded: EnvironmentalReport = serde_json::from_str(&json).expect("deserialize ocean report");
+        assert_eq!(decoded.report_id, report.report_id);
+        assert_eq!(decoded.domain, EnvironmentalDomain::Ocean);
+        assert_eq!(decoded.quality_score, report.quality_score);
+    }
+
+    #[test]
+    fn test_ocean_report_validate_ok() {
+        let report = sample_ocean_report();
+        assert!(report.validate().is_ok());
+    }
+
+    #[test]
+    fn test_ocean_domain_payload_mismatch_detection() {
+        let mut report = sample_ocean_report();
+        // Switch domain to Hydrology while keeping Ocean payload
+        report.domain = EnvironmentalDomain::Hydrology;
+        let err = report.validate().unwrap_err();
+        assert!(err.contains("domain"));
+    }
+
+    // ---- Hydrology payload tests ----
+
+    fn sample_hydrology_report() -> EnvironmentalReport {
+        EnvironmentalReport {
+            report_id: "hydro-001".to_string(),
+            domain: EnvironmentalDomain::Hydrology,
+            station_id: "gauge-mississippi-1".to_string(),
+            location: GeoLocation { latitude: 44.9, longitude: -93.1, altitude_m: Some(215.0) },
+            observed_at: 7_000_000,
+            submitted_at: 7_000_001,
+            payload: ReportPayload::Hydrology(HydrologyPayload {
+                river_discharge_m3s: Some(1250.0),
+                water_level_m: Some(4.3),
+                flow_velocity_ms: Some(0.85),
+                sediment_load_mgl: Some(320.0),
+                groundwater_level_m: Some(2.1),
+                reservoir_storage_pct: Some(72.0),
+                flood_risk_level: Some(2),
+                drought_index: Some(-0.5),
+            }),
+            quality_score: Some(0.92),
+            provenance: None,
+        }
+    }
+
+    #[test]
+    fn test_hydrology_payload_construction() {
+        let report = sample_hydrology_report();
+        assert_eq!(report.report_id, "hydro-001");
+        assert_eq!(report.domain, EnvironmentalDomain::Hydrology);
+        if let ReportPayload::Hydrology(ref p) = report.payload {
+            assert_eq!(p.river_discharge_m3s, Some(1250.0));
+            assert_eq!(p.flood_risk_level, Some(2));
+            assert_eq!(p.drought_index, Some(-0.5));
+        } else {
+            panic!("expected Hydrology payload variant");
+        }
+    }
+
+    #[test]
+    fn test_hydrology_report_serde_roundtrip() {
+        let report = sample_hydrology_report();
+        let json = serde_json::to_string(&report).expect("serialize hydrology report");
+        let decoded: EnvironmentalReport =
+            serde_json::from_str(&json).expect("deserialize hydrology report");
+        assert_eq!(decoded.report_id, report.report_id);
+        assert_eq!(decoded.domain, EnvironmentalDomain::Hydrology);
+        assert_eq!(decoded.quality_score, report.quality_score);
+    }
+
+    #[test]
+    fn test_hydrology_report_validate_ok() {
+        let report = sample_hydrology_report();
+        assert!(report.validate().is_ok());
+    }
+
+    #[test]
+    fn test_hydrology_domain_payload_mismatch_detection() {
+        let mut report = sample_hydrology_report();
+        // Switch domain to Soil while keeping Hydrology payload
+        report.domain = EnvironmentalDomain::Soil;
         let err = report.validate().unwrap_err();
         assert!(err.contains("domain"));
     }

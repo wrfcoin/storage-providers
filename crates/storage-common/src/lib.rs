@@ -10,8 +10,8 @@ pub use hashing::{arweave_content_id, filecoin_content_id, ipfs_content_id, sha2
 pub use traits::{ContentAddressed, StorageProvider};
 pub use types::{
     AdmissionDecision, AirQualityPayload, AvailabilitySlaStatus, ContentId, DataTier,
-    EnvironmentalDomain, EnvironmentalReport, GeoLocation, HealthStatus, Metadata, ProvenanceChain,
-    ProvenanceLink, ProvenanceValidationResult, PublicInterestAvailabilityPolicy, QuarantineRecord,
-    ReportPayload, StorageReceipt, StorageStats, WaterQualityPayload, WeatherPayload,
-    WildfirePayload,
+    EnvironmentalDomain, EnvironmentalReport, GeoLocation, HealthStatus, HydrologyPayload,
+    Metadata, OceanPayload, ProvenanceChain, ProvenanceLink, ProvenanceValidationResult,
+    PublicInterestAvailabilityPolicy, QuarantineRecord, ReportPayload, SoilPayload, StorageReceipt,
+    StorageStats, WaterQualityPayload, WeatherPayload, WildfirePayload,
 };
