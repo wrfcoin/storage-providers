@@ -9,6 +9,8 @@ use wrfcoin_storage_common::integrity::IntegrityVerifier;
 use wrfcoin_storage_common::traits::StorageProvider;
 use wrfcoin_storage_common::types::{ArchiveReceipt, Metadata, RetentionPolicy, StorageReceipt};
 
+use crate::metrics::MetricsCollector;
+
 /// Returns current unix timestamp in seconds.
 fn now() -> u64 {
     SystemTime::now()
@@ -18,7 +20,7 @@ fn now() -> u64 {
 }
 
 /// Metrics counters for the archive pipeline.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ArchiveMetrics {
     pub archive_attempts: u64,
     pub archive_successes: u64,
@@ -58,18 +60,13 @@ impl ArchiveMetrics {
     }
 }
 
-impl Default for ArchiveMetrics {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// Archive pipeline that stores data to N providers with integrity verification.
 pub struct ArchivePipeline {
     providers: Vec<(String, Arc<dyn StorageProvider>)>,
     min_copies: usize,
     retention_policies: Vec<RetentionPolicy>,
     metrics: std::sync::Mutex<ArchiveMetrics>,
+    metrics_collector: Option<Arc<dyn MetricsCollector>>,
 }
 
 impl ArchivePipeline {
@@ -80,6 +77,7 @@ impl ArchivePipeline {
             min_copies,
             retention_policies: Vec::new(),
             metrics: std::sync::Mutex::new(ArchiveMetrics::new()),
+            metrics_collector: None,
         }
     }
 
@@ -93,6 +91,11 @@ impl ArchivePipeline {
         self.retention_policies.push(policy);
     }
 
+    /// Set an external metrics collector.
+    pub fn set_metrics_collector(&mut self, collector: Arc<dyn MetricsCollector>) {
+        self.metrics_collector = Some(collector);
+    }
+
     /// Archive data to >= min_copies providers with integrity verification.
     ///
     /// Computes a canonical blake3 hash and stores the data to each configured
@@ -104,12 +107,13 @@ impl ArchivePipeline {
         metadata: &Metadata,
     ) -> Result<ArchiveReceipt, StorageError> {
         let canonical_hash = IntegrityVerifier::hash(data);
+        let timestamp = now();
         let mut receipts = Vec::new();
-        let mut _errors = Vec::new();
+        let mut errors = Vec::new();
 
         for (name, provider) in &self.providers {
             {
-                let mut m = self.metrics.lock().unwrap();
+                let mut m = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
                 m.archive_attempts += 1;
             }
             match provider.store(data, metadata).await {
@@ -117,16 +121,22 @@ impl ArchivePipeline {
                     receipts.push(StorageReceipt {
                         content_id,
                         provider: name.clone(),
-                        timestamp: now(),
+                        timestamp,
                         size: data.len() as u64,
                     });
-                    let mut m = self.metrics.lock().unwrap();
+                    let mut m = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
                     m.archive_successes += 1;
+                    if let Some(ref collector) = self.metrics_collector {
+                        collector.record_archive_attempt(name, true);
+                    }
                 }
                 Err(e) => {
-                    let mut m = self.metrics.lock().unwrap();
+                    let mut m = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
                     m.archive_failures += 1;
-                    _errors.push(e);
+                    if let Some(ref collector) = self.metrics_collector {
+                        collector.record_archive_attempt(name, false);
+                    }
+                    errors.push(e);
                 }
             }
         }
@@ -142,9 +152,9 @@ impl ArchivePipeline {
         Ok(ArchiveReceipt {
             canonical_cid: canonical_hash,
             provider_receipts: receipts,
-            archived_at: now(),
+            archived_at: timestamp,
             providers_attempted: self.providers.len(),
-            providers_succeeded: self.providers.len() - _errors.len(),
+            providers_succeeded: self.providers.len() - errors.len(),
         })
     }
 
@@ -160,7 +170,7 @@ impl ArchivePipeline {
         let start = std::time::Instant::now();
 
         {
-            let mut m = self.metrics.lock().unwrap();
+            let mut m = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
             m.retrieval_attempts += 1;
         }
 
@@ -172,14 +182,22 @@ impl ArchivePipeline {
             {
                 match provider.retrieve(&provider_receipt.content_id).await {
                     Ok(data) => {
-                        let mut m = self.metrics.lock().unwrap();
+                        let mut m = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
                         m.integrity_checks += 1;
 
-                        if IntegrityVerifier::verify(&data, &receipt.canonical_cid) {
+                        let passed = IntegrityVerifier::verify(&data, &receipt.canonical_cid);
+                        if let Some(ref collector) = self.metrics_collector {
+                            collector.record_integrity_check(&provider_receipt.provider, passed);
+                        }
+
+                        if passed {
                             let elapsed = start.elapsed().as_millis() as u64;
                             m.retrieval_successes += 1;
                             m.retrieval_latency_sum_ms += elapsed;
                             m.retrieval_count += 1;
+                            if let Some(ref collector) = self.metrics_collector {
+                                collector.record_retrieval(&provider_receipt.provider, true, elapsed);
+                            }
                             return Ok(data);
                         } else {
                             m.integrity_failures += 1;
@@ -192,8 +210,12 @@ impl ArchivePipeline {
         }
 
         {
-            let mut m = self.metrics.lock().unwrap();
+            let mut m = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
             m.retrieval_failures += 1;
+        }
+        if let Some(ref collector) = self.metrics_collector {
+            let elapsed = start.elapsed().as_millis() as u64;
+            collector.record_retrieval("none", false, elapsed);
         }
 
         Err(StorageError::NotFound(
@@ -223,11 +245,11 @@ impl ArchivePipeline {
 
         matching
             .iter()
-            .all(|p| p.should_retain(age_secs, quality_score))
+            .any(|p| p.should_retain(age_secs, quality_score))
     }
 
     /// Get a snapshot of current metrics.
     pub fn metrics(&self) -> ArchiveMetrics {
-        self.metrics.lock().unwrap().clone()
+        self.metrics.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
