@@ -126,6 +126,10 @@ pub struct FailoverMetrics {
     pub integrity_checks: u64,
     /// Integrity checks that detected corruption.
     pub integrity_failures: u64,
+    /// Cumulative store latency in milliseconds.
+    pub store_latency_sum_ms: u64,
+    /// Number of completed store operations (for computing average latency).
+    pub store_count: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -185,8 +189,9 @@ impl FailoverRouter {
         data: &[u8],
         metadata: &Metadata,
     ) -> Result<ContentId, StorageError> {
+        let store_start = Instant::now();
         {
-            let mut m = self.metrics.lock().unwrap();
+            let mut m = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
             m.total_requests += 1;
         }
 
@@ -196,7 +201,7 @@ impl FailoverRouter {
         for entry in &self.providers {
             // Check circuit breaker availability.
             {
-                let mut cb = entry.circuit_breaker.lock().unwrap();
+                let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
                 if !cb.is_available() {
                     continue;
                 }
@@ -205,22 +210,24 @@ impl FailoverRouter {
             match entry.provider.store(data, metadata).await {
                 Ok(cid) => {
                     {
-                        let mut cb = entry.circuit_breaker.lock().unwrap();
+                        let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
                         cb.record_success();
                     }
                     {
-                        let mut m = self.metrics.lock().unwrap();
+                        let mut m = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
                         if is_first_available {
                             m.primary_successes += 1;
                         } else {
                             m.failover_count += 1;
                         }
+                        m.store_latency_sum_ms += store_start.elapsed().as_millis() as u64;
+                        m.store_count += 1;
                     }
                     return Ok(cid);
                 }
                 Err(e) => {
                     {
-                        let mut cb = entry.circuit_breaker.lock().unwrap();
+                        let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
                         cb.record_failure();
                     }
                     last_err = Some(e);
@@ -230,7 +237,7 @@ impl FailoverRouter {
         }
 
         {
-            let mut m = self.metrics.lock().unwrap();
+            let mut m = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
             m.total_failures += 1;
         }
 
@@ -250,7 +257,7 @@ impl FailoverRouter {
         expected_hash: Option<&str>,
     ) -> Result<Vec<u8>, StorageError> {
         {
-            let mut m = self.metrics.lock().unwrap();
+            let mut m = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
             m.total_requests += 1;
         }
 
@@ -259,7 +266,7 @@ impl FailoverRouter {
 
         for entry in &self.providers {
             {
-                let mut cb = entry.circuit_breaker.lock().unwrap();
+                let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
                 if !cb.is_available() {
                     continue;
                 }
@@ -269,13 +276,13 @@ impl FailoverRouter {
                 Ok(data) => {
                     // Integrity check if a hash was supplied.
                     if let Some(hash) = expected_hash {
-                        let mut m = self.metrics.lock().unwrap();
+                        let mut m = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
                         m.integrity_checks += 1;
                         if !IntegrityVerifier::verify(&data, hash) {
                             m.integrity_failures += 1;
                             drop(m);
                             {
-                                let mut cb = entry.circuit_breaker.lock().unwrap();
+                                let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
                                 cb.record_failure();
                             }
                             last_err = Some(StorageError::InvalidData(format!(
@@ -288,11 +295,11 @@ impl FailoverRouter {
                     }
 
                     {
-                        let mut cb = entry.circuit_breaker.lock().unwrap();
+                        let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
                         cb.record_success();
                     }
                     {
-                        let mut m = self.metrics.lock().unwrap();
+                        let mut m = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
                         if is_first_available {
                             m.primary_successes += 1;
                         } else {
@@ -303,7 +310,7 @@ impl FailoverRouter {
                 }
                 Err(e) => {
                     {
-                        let mut cb = entry.circuit_breaker.lock().unwrap();
+                        let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
                         cb.record_failure();
                     }
                     last_err = Some(e);
@@ -313,7 +320,7 @@ impl FailoverRouter {
         }
 
         {
-            let mut m = self.metrics.lock().unwrap();
+            let mut m = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
             m.total_failures += 1;
         }
 
@@ -326,7 +333,7 @@ impl FailoverRouter {
     pub async fn exists(&self, id: &ContentId) -> Result<bool, StorageError> {
         for entry in &self.providers {
             {
-                let mut cb = entry.circuit_breaker.lock().unwrap();
+                let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
                 if !cb.is_available() {
                     continue;
                 }
@@ -334,17 +341,17 @@ impl FailoverRouter {
 
             match entry.provider.exists(id).await {
                 Ok(true) => {
-                    let mut cb = entry.circuit_breaker.lock().unwrap();
+                    let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
                     cb.record_success();
                     return Ok(true);
                 }
                 Ok(false) => {
-                    let mut cb = entry.circuit_breaker.lock().unwrap();
+                    let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
                     cb.record_success();
                     // Content might exist on another provider.
                 }
                 Err(_) => {
-                    let mut cb = entry.circuit_breaker.lock().unwrap();
+                    let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
                     cb.record_failure();
                 }
             }
@@ -365,7 +372,7 @@ impl FailoverRouter {
 
     /// Return a snapshot of the current failover metrics.
     pub fn metrics(&self) -> FailoverMetrics {
-        self.metrics.lock().unwrap().clone()
+        self.metrics.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
 
@@ -383,6 +390,10 @@ impl StorageProvider for FailoverRouter {
         FailoverRouter::store(self, data, metadata).await
     }
 
+    /// NOTE: The `StorageProvider` trait `retrieve` does not perform integrity
+    /// verification because the trait signature has no `expected_hash` parameter.
+    /// For integrity-verified retrieval, use `FailoverRouter::retrieve()` directly
+    /// with an `expected_hash`.
     async fn retrieve(&self, id: &ContentId) -> Result<Vec<u8>, StorageError> {
         FailoverRouter::retrieve(self, id, None).await
     }
@@ -395,19 +406,19 @@ impl StorageProvider for FailoverRouter {
         let mut last_err: Option<StorageError> = None;
         for entry in &self.providers {
             {
-                let mut cb = entry.circuit_breaker.lock().unwrap();
+                let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
                 if !cb.is_available() {
                     continue;
                 }
             }
             match entry.provider.delete(id).await {
                 Ok(()) => {
-                    let mut cb = entry.circuit_breaker.lock().unwrap();
+                    let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
                     cb.record_success();
                     return Ok(());
                 }
                 Err(e) => {
-                    let mut cb = entry.circuit_breaker.lock().unwrap();
+                    let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
                     cb.record_failure();
                     last_err = Some(e);
                 }
