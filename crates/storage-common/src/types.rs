@@ -356,6 +356,10 @@ pub struct ArchiveReceipt {
     pub providers_attempted: usize,
     /// Total providers succeeded.
     pub providers_succeeded: usize,
+    /// Result of provenance validation (if performed).
+    pub provenance_result: Option<ProvenanceValidationResult>,
+    /// Admission decision (if provenance gate was active).
+    pub admission_decision: Option<AdmissionDecision>,
 }
 
 /// Retention policy for archived data.
