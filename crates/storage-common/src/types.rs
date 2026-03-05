@@ -343,6 +343,64 @@ impl EnvironmentalReport {
     }
 }
 
+/// Receipt from archiving data to multiple providers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveReceipt {
+    /// Canonical content ID (blake3 hash of original data).
+    pub canonical_cid: String,
+    /// Per-provider storage results.
+    pub provider_receipts: Vec<StorageReceipt>,
+    /// Timestamp of archive operation.
+    pub archived_at: u64,
+    /// Total providers attempted.
+    pub providers_attempted: usize,
+    /// Total providers succeeded.
+    pub providers_succeeded: usize,
+}
+
+/// Retention policy for archived data.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetentionPolicy {
+    /// Minimum number of provider copies to maintain.
+    pub min_copies: usize,
+    /// Maximum age in seconds before expiry (0 = never expires).
+    pub max_age_secs: u64,
+    /// Data tier this policy applies to.
+    pub tier: DataTier,
+    /// Artifact class (e.g., "forecast", "observation", "analysis").
+    pub artifact_class: String,
+    /// Quality tier minimum (0.0-1.0, data below this gets shorter retention).
+    pub min_quality_score: f64,
+}
+
+impl RetentionPolicy {
+    /// Create a new retention policy with sensible defaults.
+    pub fn new(artifact_class: &str, tier: DataTier, min_copies: usize) -> Self {
+        Self {
+            min_copies,
+            max_age_secs: 0,
+            tier,
+            artifact_class: artifact_class.to_string(),
+            min_quality_score: 0.0,
+        }
+    }
+
+    /// Check whether data should be retained given its age and quality score.
+    ///
+    /// Returns `true` if the data should be kept:
+    /// - Quality score must be >= `min_quality_score`
+    /// - Age must be <= `max_age_secs` (or `max_age_secs == 0` means never expires)
+    pub fn should_retain(&self, age_secs: u64, quality_score: f64) -> bool {
+        if quality_score < self.min_quality_score {
+            return false;
+        }
+        if self.max_age_secs == 0 {
+            return true;
+        }
+        age_secs <= self.max_age_secs
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
