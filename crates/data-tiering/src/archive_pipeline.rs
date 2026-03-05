@@ -6,8 +6,12 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use wrfcoin_storage_common::error::StorageError;
 use wrfcoin_storage_common::integrity::IntegrityVerifier;
+use wrfcoin_storage_common::provenance::{ProvenancePolicy, ProvenanceValidator};
 use wrfcoin_storage_common::traits::StorageProvider;
-use wrfcoin_storage_common::types::{ArchiveReceipt, Metadata, RetentionPolicy, StorageReceipt};
+use wrfcoin_storage_common::types::{
+    AdmissionDecision, ArchiveReceipt, Metadata, ProvenanceChain, QuarantineRecord,
+    RetentionPolicy, StorageReceipt,
+};
 
 use crate::metrics::MetricsCollector;
 
@@ -67,6 +71,8 @@ pub struct ArchivePipeline {
     retention_policies: Vec<RetentionPolicy>,
     metrics: std::sync::Mutex<ArchiveMetrics>,
     metrics_collector: Option<Arc<dyn MetricsCollector>>,
+    provenance_validator: Option<ProvenanceValidator>,
+    quarantine_log: std::sync::Mutex<Vec<QuarantineRecord>>,
 }
 
 impl ArchivePipeline {
@@ -78,6 +84,8 @@ impl ArchivePipeline {
             retention_policies: Vec::new(),
             metrics: std::sync::Mutex::new(ArchiveMetrics::new()),
             metrics_collector: None,
+            provenance_validator: None,
+            quarantine_log: std::sync::Mutex::new(Vec::new()),
         }
     }
 
@@ -155,6 +163,8 @@ impl ArchivePipeline {
             archived_at: timestamp,
             providers_attempted: self.providers.len(),
             providers_succeeded: self.providers.len() - errors.len(),
+            provenance_result: None,
+            admission_decision: None,
         })
     }
 
@@ -251,5 +261,86 @@ impl ArchivePipeline {
     /// Get a snapshot of current metrics.
     pub fn metrics(&self) -> ArchiveMetrics {
         self.metrics.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Set a provenance policy, enabling provenance-gated archiving.
+    pub fn set_provenance_policy(&mut self, policy: ProvenancePolicy) {
+        self.provenance_validator = Some(ProvenanceValidator::new(policy));
+    }
+
+    /// Archive data with provenance admission control.
+    ///
+    /// If no provenance validator is set, falls through to `archive()` and
+    /// returns `(Accepted, Some(receipt))`.
+    ///
+    /// Otherwise:
+    /// - **Accepted**: stores normally, populates audit fields on receipt.
+    /// - **Quarantined**: creates a quarantine record, still stores (flagged),
+    ///   populates audit fields.
+    /// - **Rejected**: returns `(Rejected, None)` — data is not stored.
+    pub async fn archive_with_provenance(
+        &self,
+        data: &[u8],
+        metadata: &Metadata,
+        provenance: Option<&ProvenanceChain>,
+    ) -> Result<(AdmissionDecision, Option<ArchiveReceipt>), StorageError> {
+        let validator = match &self.provenance_validator {
+            Some(v) => v,
+            None => {
+                let receipt = self.archive(data, metadata).await?;
+                return Ok((AdmissionDecision::Accepted, Some(receipt)));
+            }
+        };
+
+        let (decision, reason) = validator.decide_admission(provenance);
+
+        match decision {
+            AdmissionDecision::Accepted => {
+                let validation_result = provenance
+                    .map(|c| validator.validate_chain(c));
+                let mut receipt = self.archive(data, metadata).await?;
+                receipt.provenance_result = validation_result;
+                receipt.admission_decision = Some(AdmissionDecision::Accepted);
+                Ok((AdmissionDecision::Accepted, Some(receipt)))
+            }
+            AdmissionDecision::Quarantined => {
+                let validation_result = provenance
+                    .map(|c| validator.validate_chain(c));
+                let now_ts = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let quarantine_id = format!(
+                    "q-{}-{}",
+                    now_ts,
+                    provenance.map(|c| c.chain_id.as_str()).unwrap_or("unknown")
+                );
+                let record = QuarantineRecord {
+                    quarantine_id,
+                    reason: reason.unwrap_or_else(|| "unknown".to_string()),
+                    detected_at: now_ts,
+                    review_required: true,
+                    reinstated: false,
+                };
+                {
+                    let mut log = self.quarantine_log.lock().unwrap_or_else(|e| e.into_inner());
+                    log.push(record);
+                }
+                // Still store, but flagged
+                let mut receipt = self.archive(data, metadata).await?;
+                receipt.provenance_result = validation_result;
+                receipt.admission_decision = Some(AdmissionDecision::Quarantined);
+                Ok((AdmissionDecision::Quarantined, Some(receipt)))
+            }
+            AdmissionDecision::Rejected => Ok((AdmissionDecision::Rejected, None)),
+        }
+    }
+
+    /// Return a snapshot of all quarantine records.
+    pub fn quarantine_records(&self) -> Vec<QuarantineRecord> {
+        self.quarantine_log
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 }
