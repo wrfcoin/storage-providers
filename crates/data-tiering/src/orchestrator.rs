@@ -7,29 +7,11 @@ use wrfcoin_storage_common::{
     ProvenanceChain, ProvenanceValidationResult, PublicInterestAvailabilityPolicy, QuarantineRecord,
     StorageError, StorageProvider, StorageStats,
 };
+use wrfcoin_storage_common::provenance::{
+    ProvenancePolicy, ProvenanceValidator,
+};
 
 use crate::tiers::TieringConfig;
-
-/// Policy that governs what provenance chains are considered acceptable at ingest.
-#[derive(Debug, Clone)]
-pub struct ProvenancePolicy {
-    /// If true, content without a provenance chain is rejected outright.
-    pub require_provenance: bool,
-    /// Minimum number of links required in the chain (0 = no minimum).
-    pub min_chain_length: usize,
-    /// Accepted signature algorithms. An empty list means all algorithms are allowed.
-    pub allowed_algorithms: Vec<String>,
-}
-
-impl Default for ProvenancePolicy {
-    fn default() -> Self {
-        Self {
-            require_provenance: true,
-            min_chain_length: 1,
-            allowed_algorithms: Vec::new(),
-        }
-    }
-}
 
 /// Orchestrates storage across multiple tiers (hot/warm/cold/archive).
 ///
@@ -187,58 +169,9 @@ impl DataTieringOrchestrator {
 
     /// Verify provenance chain integrity for accepted content.
     pub fn validate_provenance_chain(&self, chain: &ProvenanceChain) -> ProvenanceValidationResult {
-        if chain.chain_id.trim().is_empty() || chain.root_hash.trim().is_empty() {
-            return ProvenanceValidationResult {
-                valid: false,
-                reason: "chain_id and root_hash are required".to_string(),
-                invalid_links: chain.links.len(),
-            };
-        }
-
-        if chain.links.is_empty() {
-            return ProvenanceValidationResult {
-                valid: false,
-                reason: "at least one provenance link is required".to_string(),
-                invalid_links: 1,
-            };
-        }
-
-        let mut invalid_links = 0usize;
-        for (idx, link) in chain.links.iter().enumerate() {
-            if link.artifact_hash.trim().is_empty()
-                || link.signer.trim().is_empty()
-                || link.signature.trim().is_empty()
-                || link.algorithm.trim().is_empty()
-            {
-                invalid_links += 1;
-                continue;
-            }
-
-            if idx == 0 {
-                if link.artifact_hash != chain.root_hash {
-                    invalid_links += 1;
-                }
-            } else {
-                let prev = &chain.links[idx - 1];
-                if link.parent_hash.as_deref() != Some(prev.artifact_hash.as_str()) {
-                    invalid_links += 1;
-                }
-            }
-        }
-
-        if invalid_links > 0 {
-            return ProvenanceValidationResult {
-                valid: false,
-                reason: "provenance chain continuity/signature metadata failed validation".to_string(),
-                invalid_links,
-            };
-        }
-
-        ProvenanceValidationResult {
-            valid: true,
-            reason: "valid provenance chain".to_string(),
-            invalid_links: 0,
-        }
+        let policy = self.provenance_policy.read().unwrap().clone();
+        let validator = ProvenanceValidator::new(policy);
+        validator.validate_chain(chain)
     }
 
     /// Store content with provenance-first enforcement. Invalid chains are quarantined.
@@ -295,36 +228,9 @@ impl DataTieringOrchestrator {
     /// Returns `Ok(())` when the chain satisfies all policy constraints,
     /// otherwise `Err` with a human-readable reason.
     fn validate_chain_with_policy(&self, chain: &ProvenanceChain) -> Result<(), String> {
-        // Structural integrity first.
-        let result = self.validate_provenance_chain(chain);
-        if !result.valid {
-            return Err(result.reason);
-        }
-
-        let policy = self.provenance_policy.read().unwrap();
-
-        // Minimum chain length.
-        if chain.links.len() < policy.min_chain_length {
-            return Err(format!(
-                "provenance chain has {} links but policy requires at least {}",
-                chain.links.len(),
-                policy.min_chain_length
-            ));
-        }
-
-        // Allowed algorithms (empty list = allow all).
-        if !policy.allowed_algorithms.is_empty() {
-            for link in &chain.links {
-                if !policy.allowed_algorithms.contains(&link.algorithm) {
-                    return Err(format!(
-                        "algorithm '{}' is not in the allowed algorithms list",
-                        link.algorithm
-                    ));
-                }
-            }
-        }
-
-        Ok(())
+        let policy = self.provenance_policy.read().unwrap().clone();
+        let validator = ProvenanceValidator::new(policy);
+        validator.validate_with_policy(chain)
     }
 
     /// Store data with provenance enforcement according to the active policy.

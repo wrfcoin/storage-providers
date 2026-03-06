@@ -8,6 +8,7 @@ use wrfcoin_data_tiering::archive_pipeline::ArchivePipeline;
 use wrfcoin_data_tiering::retention::RetentionManager;
 use wrfcoin_storage_common::error::StorageError;
 use wrfcoin_storage_common::integrity::IntegrityVerifier;
+use wrfcoin_storage_common::provenance::ProvenancePolicy;
 use wrfcoin_storage_common::traits::StorageProvider;
 use wrfcoin_storage_common::types::*;
 
@@ -338,4 +339,165 @@ async fn test_archive_metrics_avg_latency() {
     m.retrieval_latency_sum_ms = 100;
     m.retrieval_count = 4;
     assert!((m.avg_retrieval_latency_ms() - 25.0).abs() < f64::EPSILON);
+}
+
+// ---------------------------------------------------------------------------
+// Provenance integration tests
+// ---------------------------------------------------------------------------
+
+fn valid_provenance_chain() -> ProvenanceChain {
+    ProvenanceChain {
+        chain_id: "chain-1".to_string(),
+        root_hash: "root".to_string(),
+        links: vec![
+            ProvenanceLink {
+                artifact_hash: "root".to_string(),
+                parent_hash: None,
+                signer: "signer-1".to_string(),
+                signature: "sig-1".to_string(),
+                algorithm: "ed25519".to_string(),
+                signed_at: 10,
+            },
+            ProvenanceLink {
+                artifact_hash: "child-1".to_string(),
+                parent_hash: Some("root".to_string()),
+                signer: "signer-2".to_string(),
+                signature: "sig-2".to_string(),
+                algorithm: "ed25519".to_string(),
+                signed_at: 11,
+            },
+        ],
+    }
+}
+
+#[tokio::test]
+async fn test_archive_with_provenance_valid() {
+    let mut pipeline = ArchivePipeline::new(1);
+    pipeline.add_provider("ipfs", Arc::new(MockProvider::new("ipfs")));
+    pipeline.set_provenance_policy(ProvenancePolicy::default());
+
+    let data = b"provenance-gated weather data";
+    let metadata = test_metadata();
+    let chain = valid_provenance_chain();
+
+    let (decision, receipt) = pipeline
+        .archive_with_provenance(data, &metadata, Some(&chain))
+        .await
+        .unwrap();
+
+    assert_eq!(decision, AdmissionDecision::Accepted);
+    let receipt = receipt.expect("receipt should be present for accepted data");
+    assert_eq!(receipt.admission_decision, Some(AdmissionDecision::Accepted));
+    assert!(receipt.provenance_result.is_some());
+    assert!(receipt.provenance_result.unwrap().valid);
+}
+
+#[tokio::test]
+async fn test_archive_with_provenance_missing_rejected() {
+    let mut pipeline = ArchivePipeline::new(1);
+    pipeline.add_provider("ipfs", Arc::new(MockProvider::new("ipfs")));
+    pipeline.set_provenance_policy(ProvenancePolicy {
+        require_provenance: true,
+        min_chain_length: 1,
+        allowed_algorithms: Vec::new(),
+    });
+
+    let data = b"data without provenance";
+    let metadata = test_metadata();
+
+    let (decision, receipt) = pipeline
+        .archive_with_provenance(data, &metadata, None)
+        .await
+        .unwrap();
+
+    assert_eq!(decision, AdmissionDecision::Rejected);
+    assert!(receipt.is_none());
+}
+
+#[tokio::test]
+async fn test_archive_with_provenance_invalid_quarantined() {
+    let mut pipeline = ArchivePipeline::new(1);
+    pipeline.add_provider("ipfs", Arc::new(MockProvider::new("ipfs")));
+    pipeline.set_provenance_policy(ProvenancePolicy::default());
+
+    let bad_chain = ProvenanceChain {
+        chain_id: "bad-chain".to_string(),
+        root_hash: "root".to_string(),
+        links: vec![ProvenanceLink {
+            artifact_hash: "wrong-hash".to_string(),
+            parent_hash: None,
+            signer: "signer".to_string(),
+            signature: "sig".to_string(),
+            algorithm: "ed25519".to_string(),
+            signed_at: 1,
+        }],
+    };
+
+    let data = b"bad provenance data";
+    let metadata = test_metadata();
+
+    let (decision, receipt) = pipeline
+        .archive_with_provenance(data, &metadata, Some(&bad_chain))
+        .await
+        .unwrap();
+
+    assert_eq!(decision, AdmissionDecision::Quarantined);
+    let receipt = receipt.expect("quarantined data should still be stored");
+    assert_eq!(receipt.admission_decision, Some(AdmissionDecision::Quarantined));
+}
+
+#[tokio::test]
+async fn test_archive_without_validator_bypasses() {
+    let mut pipeline = ArchivePipeline::new(1);
+    pipeline.add_provider("ipfs", Arc::new(MockProvider::new("ipfs")));
+    // No provenance policy set — should bypass provenance checks
+
+    let data = b"unvalidated data";
+    let metadata = test_metadata();
+
+    let (decision, receipt) = pipeline
+        .archive_with_provenance(data, &metadata, None)
+        .await
+        .unwrap();
+
+    assert_eq!(decision, AdmissionDecision::Accepted);
+    let receipt = receipt.expect("should get receipt when no validator is set");
+    // Audit fields should be None when no validator is active
+    assert!(receipt.provenance_result.is_none());
+    assert!(receipt.admission_decision.is_none());
+}
+
+#[tokio::test]
+async fn test_quarantine_records_accessible() {
+    let mut pipeline = ArchivePipeline::new(1);
+    pipeline.add_provider("ipfs", Arc::new(MockProvider::new("ipfs")));
+    pipeline.set_provenance_policy(ProvenancePolicy::default());
+
+    // Initially empty
+    assert!(pipeline.quarantine_records().is_empty());
+
+    // Submit data with invalid provenance
+    let bad_chain = ProvenanceChain {
+        chain_id: "bad-chain".to_string(),
+        root_hash: "root".to_string(),
+        links: vec![ProvenanceLink {
+            artifact_hash: "wrong".to_string(),
+            parent_hash: None,
+            signer: "signer".to_string(),
+            signature: "sig".to_string(),
+            algorithm: "ed25519".to_string(),
+            signed_at: 1,
+        }],
+    };
+
+    let _ = pipeline
+        .archive_with_provenance(b"bad data", &test_metadata(), Some(&bad_chain))
+        .await
+        .unwrap();
+
+    let records = pipeline.quarantine_records();
+    assert_eq!(records.len(), 1);
+    assert!(records[0].review_required);
+    assert!(!records[0].reinstated);
+    assert!(!records[0].reason.is_empty());
 }
