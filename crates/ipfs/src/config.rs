@@ -17,6 +17,10 @@ pub struct IpfsConfig {
     pub cache_capacity: usize,
     /// Time-to-live for cache entries in seconds.
     pub cache_ttl_secs: u64,
+    /// Bearer token for authenticating with the IPFS API.
+    /// Read from `IPFS_API_TOKEN` env var by default.
+    #[serde(default)]
+    pub api_token: Option<String>,
 }
 
 impl Default for IpfsConfig {
@@ -29,6 +33,7 @@ impl Default for IpfsConfig {
             pin_by_default: true,
             cache_capacity: 10_000,
             cache_ttl_secs: 3600,
+            api_token: std::env::var("IPFS_API_TOKEN").ok(),
         }
     }
 }

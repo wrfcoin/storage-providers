@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use wrfcoin_storage_common::StorageError;
 
 /// A peer node in the IPFS cluster (weather station network).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,7 +31,7 @@ impl Default for IpfsClusterConfig {
     fn default() -> Self {
         Self {
             cluster_name: "wrfcoin-weather".to_string(),
-            cluster_secret: None,
+            cluster_secret: std::env::var("IPFS_CLUSTER_SECRET").ok(),
             replication_factor: 3,
         }
     }
@@ -45,11 +46,34 @@ pub struct ClusterManager {
 
 impl ClusterManager {
     /// Create a new cluster manager with the given configuration.
-    pub fn new(config: IpfsClusterConfig) -> Self {
-        Self {
+    ///
+    /// Returns an error if `cluster_secret` is `Some("")` (fail-closed on empty secrets).
+    pub fn new(config: IpfsClusterConfig) -> Result<Self, StorageError> {
+        if let Some(ref secret) = config.cluster_secret {
+            if secret.is_empty() {
+                return Err(StorageError::ConfigError(
+                    "IPFS cluster secret is configured but empty — refusing to proceed".to_string(),
+                ));
+            }
+        }
+        Ok(Self {
             config,
             peers: Vec::new(),
-        }
+        })
+    }
+
+    /// Return the cluster secret, if configured.
+    pub fn cluster_secret(&self) -> Option<&str> {
+        self.config.cluster_secret.as_deref()
+    }
+
+    /// Build auth headers for cluster API calls.
+    /// Returns a tuple of (header_name, header_value) when a secret is configured.
+    pub fn auth_header(&self) -> Option<(&'static str, String)> {
+        self.config
+            .cluster_secret
+            .as_ref()
+            .map(|secret| ("Authorization", format!("Bearer {secret}")))
     }
 
     /// Add a peer to the cluster.
@@ -114,7 +138,7 @@ mod tests {
 
     #[test]
     fn test_add_and_list_peers() {
-        let mut cm = ClusterManager::new(IpfsClusterConfig::default());
+        let mut cm = ClusterManager::new(IpfsClusterConfig::default()).unwrap();
         cm.add_peer(peer("peer-1", 40.0, -74.0));
         cm.add_peer(peer("peer-2", 51.0, 0.0));
         assert_eq!(cm.peers().len(), 2);
@@ -122,7 +146,7 @@ mod tests {
 
     #[test]
     fn test_remove_peer() {
-        let mut cm = ClusterManager::new(IpfsClusterConfig::default());
+        let mut cm = ClusterManager::new(IpfsClusterConfig::default()).unwrap();
         cm.add_peer(peer("peer-1", 0.0, 0.0));
         assert!(cm.remove_peer("peer-1"));
         assert_eq!(cm.peers().len(), 0);
@@ -132,7 +156,7 @@ mod tests {
     #[test]
     fn test_select_peers_near_sorts_by_distance() {
         let config = IpfsClusterConfig { replication_factor: 2, ..Default::default() };
-        let mut cm = ClusterManager::new(config);
+        let mut cm = ClusterManager::new(config).unwrap();
         cm.add_peer(peer("far", 90.0, 90.0));
         cm.add_peer(peer("near", 1.0, 1.0));
         cm.add_peer(peer("medium", 10.0, 10.0));
@@ -145,7 +169,7 @@ mod tests {
 
     #[test]
     fn test_select_peers_empty_cluster() {
-        let cm = ClusterManager::new(IpfsClusterConfig::default());
+        let cm = ClusterManager::new(IpfsClusterConfig::default()).unwrap();
         let selected = cm.select_peers_near(0.0, 0.0);
         assert!(selected.is_empty());
     }
@@ -153,7 +177,48 @@ mod tests {
     #[test]
     fn test_replication_factor() {
         let config = IpfsClusterConfig { replication_factor: 5, ..Default::default() };
-        let cm = ClusterManager::new(config);
+        let cm = ClusterManager::new(config).unwrap();
         assert_eq!(cm.replication_factor(), 5);
+    }
+
+    #[test]
+    fn test_cluster_rejects_empty_secret() {
+        let config = IpfsClusterConfig {
+            cluster_secret: Some("".to_string()),
+            ..Default::default()
+        };
+        assert!(ClusterManager::new(config).is_err());
+    }
+
+    #[test]
+    fn test_cluster_accepts_valid_secret() {
+        let config = IpfsClusterConfig {
+            cluster_secret: Some("my-secret".to_string()),
+            ..Default::default()
+        };
+        let cm = ClusterManager::new(config).unwrap();
+        assert_eq!(cm.cluster_secret(), Some("my-secret"));
+    }
+
+    #[test]
+    fn test_cluster_auth_header_when_secret_set() {
+        let config = IpfsClusterConfig {
+            cluster_secret: Some("my-secret".to_string()),
+            ..Default::default()
+        };
+        let cm = ClusterManager::new(config).unwrap();
+        let (name, value) = cm.auth_header().unwrap();
+        assert_eq!(name, "Authorization");
+        assert_eq!(value, "Bearer my-secret");
+    }
+
+    #[test]
+    fn test_cluster_auth_header_when_no_secret() {
+        let config = IpfsClusterConfig {
+            cluster_secret: None,
+            ..Default::default()
+        };
+        let cm = ClusterManager::new(config).unwrap();
+        assert!(cm.auth_header().is_none());
     }
 }
