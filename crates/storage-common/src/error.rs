@@ -34,4 +34,8 @@ pub enum StorageError {
     /// The operation would exceed the configured cost limit.
     #[error("cost exceeded: {0}")]
     CostExceeded(String),
+
+    /// An internal error (e.g. lock poisoning).
+    #[error("internal error: {0}")]
+    Internal(String),
 }
