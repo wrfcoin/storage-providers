@@ -12,7 +12,9 @@ pub mod tiers;
 pub use archive_pipeline::{ArchiveMetrics, ArchivePipeline};
 pub use budget::StorageBudget;
 pub use metrics::{InMemoryMetrics, MetricsCollector};
-pub use orchestrator::{DataTieringOrchestrator, ProvenancePolicy, PublicInterestStoreResult};
+pub use orchestrator::{DataTieringOrchestrator, PublicInterestStoreResult};
+// ProvenancePolicy is now in wrfcoin-storage-common; re-export for backward compatibility.
+pub use wrfcoin_storage_common::provenance::ProvenancePolicy;
 pub use public_access::{AccessCheckResult, AccessTier, PublicInterestAccessManager, PublicInterestAccessPolicy};
 pub use quality::{
     AccessControlPolicy, QualityRetentionManager, QualityRetentionPolicy, TrustClass,
