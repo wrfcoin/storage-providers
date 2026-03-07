@@ -1,4 +1,9 @@
 //! Reusable, stateless provenance validation for ingest admission control.
+//!
+//! Enforcement: Active. All store operations via `DataTieringOrchestrator` and
+//! `ArchivePipeline` validate provenance chains when a `ProvenancePolicy` is set.
+//! See `orchestrator::store_with_provenance_enforcement()` and
+//! `archive_pipeline::archive_with_provenance()`.
 
 use crate::types::{AdmissionDecision, ProvenanceChain, ProvenanceValidationResult};
 
