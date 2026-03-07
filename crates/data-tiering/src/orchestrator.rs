@@ -7,6 +7,8 @@ use wrfcoin_storage_common::{
     ProvenanceChain, ProvenanceValidationResult, PublicInterestAvailabilityPolicy, QuarantineRecord,
     StorageError, StorageProvider, StorageStats,
 };
+use wrfcoin_storage_common::domain_index::{DomainContentIndex, IndexEntry};
+use wrfcoin_storage_common::EnvironmentalDomain;
 use wrfcoin_storage_common::provenance::{
     ProvenancePolicy, ProvenanceValidator,
 };
@@ -23,6 +25,7 @@ pub struct DataTieringOrchestrator {
     quarantine_records: Arc<RwLock<HashMap<String, QuarantineRecord>>>,
     public_interest_policies: Arc<RwLock<HashMap<String, PublicInterestAvailabilityPolicy>>>,
     provenance_policy: Arc<RwLock<ProvenancePolicy>>,
+    domain_index: Arc<RwLock<DomainContentIndex>>,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +46,7 @@ impl DataTieringOrchestrator {
             quarantine_records: Arc::new(RwLock::new(HashMap::new())),
             public_interest_policies: Arc::new(RwLock::new(HashMap::new())),
             provenance_policy: Arc::new(RwLock::new(ProvenancePolicy::default())),
+            domain_index: Arc::new(RwLock::new(DomainContentIndex::new())),
         }
     }
 
@@ -333,8 +337,41 @@ impl DataTieringOrchestrator {
             },
         };
 
-        self.store_with_provenance_enforcement(&bytes, &metadata, &tier, provenance)
-            .await
+        let decision = self.store_with_provenance_enforcement(&bytes, &metadata, &tier, provenance)
+            .await?;
+
+        if decision == AdmissionDecision::Accepted {
+            if let Ok(mut idx) = self.domain_index.write() {
+                idx.insert(IndexEntry {
+                    content_id: ContentId {
+                        provider: format!("{tier:?}"),
+                        hash: report.report_id.clone(),
+                    },
+                    domain: report.domain.clone(),
+                    station_id: report.station_id.clone(),
+                    report_id: report.report_id.clone(),
+                    stored_at: report.submitted_at,
+                });
+            }
+        }
+
+        Ok(decision)
+    }
+
+    /// Query the domain content index for a given environmental domain.
+    pub fn query_domain_index(&self, domain: &EnvironmentalDomain) -> Vec<IndexEntry> {
+        self.domain_index
+            .read()
+            .map(|idx| idx.query_by_domain(domain).to_vec())
+            .unwrap_or_default()
+    }
+
+    /// Return total entries in the domain content index.
+    pub fn domain_index_total(&self) -> usize {
+        self.domain_index
+            .read()
+            .map(|idx| idx.total_count())
+            .unwrap_or(0)
     }
 
     /// Return quarantine records for synthetic-content review workflows.
@@ -950,5 +987,94 @@ mod tests {
 
         let result = orch.store_environmental_report(&report, DataTier::Hot).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_store_environmental_report_indexes_by_domain() {
+        use wrfcoin_storage_common::{
+            EnvironmentalDomain, EnvironmentalReport, GeoLocation, ReportPayload, SoilPayload,
+        };
+
+        let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
+        orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
+        orch.set_provenance_policy(ProvenancePolicy {
+            require_provenance: false,
+            min_chain_length: 0,
+            allowed_algorithms: Vec::new(),
+        }).unwrap();
+
+        let soil_report = EnvironmentalReport {
+            report_id: "soil-idx-1".into(),
+            domain: EnvironmentalDomain::Soil,
+            station_id: "stn-s1".into(),
+            location: GeoLocation { latitude: 45.0, longitude: -93.0, altitude_m: None },
+            observed_at: 1000, submitted_at: 1001,
+            payload: ReportPayload::Soil(SoilPayload {
+                moisture_pct: Some(30.0), temperature_c: None, ph: Some(6.5),
+                organic_carbon_pct: None, nitrogen_mgl: None, phosphorus_mgl: None,
+                potassium_mgl: None, conductivity_dsm: None, depth_cm: Some(10.0),
+            }),
+            quality_score: Some(0.9),
+            provenance: None,
+        };
+
+        orch.store_environmental_report(&soil_report, DataTier::Hot).await.unwrap();
+
+        assert_eq!(orch.query_domain_index(&EnvironmentalDomain::Soil).len(), 1);
+        assert_eq!(orch.query_domain_index(&EnvironmentalDomain::Ocean).len(), 0);
+        assert_eq!(orch.domain_index_total(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_domain_index_multiple_domains() {
+        use wrfcoin_storage_common::{
+            EnvironmentalDomain, EnvironmentalReport, GeoLocation, ReportPayload,
+            SoilPayload, OceanPayload, HydrologyPayload,
+        };
+
+        let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
+        orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
+        orch.set_provenance_policy(ProvenancePolicy {
+            require_provenance: false,
+            min_chain_length: 0,
+            allowed_algorithms: Vec::new(),
+        }).unwrap();
+
+        let make_report = |id: &str, domain: EnvironmentalDomain, payload: ReportPayload| {
+            EnvironmentalReport {
+                report_id: id.into(), domain,
+                station_id: "stn-1".into(),
+                location: GeoLocation { latitude: 0.0, longitude: 0.0, altitude_m: None },
+                observed_at: 1000, submitted_at: 1001, payload,
+                quality_score: None, provenance: None,
+            }
+        };
+
+        let soil = make_report("s1", EnvironmentalDomain::Soil, ReportPayload::Soil(SoilPayload {
+            moisture_pct: Some(20.0), temperature_c: None, ph: None,
+            organic_carbon_pct: None, nitrogen_mgl: None, phosphorus_mgl: None,
+            potassium_mgl: None, conductivity_dsm: None, depth_cm: None,
+        }));
+        let ocean = make_report("o1", EnvironmentalDomain::Ocean, ReportPayload::Ocean(OceanPayload {
+            sea_surface_temperature_c: Some(25.0), salinity_psu: None,
+            wave_height_m: None, wave_period_s: None, current_speed_ms: None,
+            current_direction_deg: None, chlorophyll_a_mgl: None,
+            dissolved_oxygen_mgl: None, depth_m: None,
+        }));
+        let hydro = make_report("h1", EnvironmentalDomain::Hydrology, ReportPayload::Hydrology(HydrologyPayload {
+            river_discharge_m3s: Some(500.0), water_level_m: None,
+            flow_velocity_ms: None, sediment_load_mgl: None,
+            groundwater_level_m: None, reservoir_storage_pct: None,
+            flood_risk_level: None, drought_index: None,
+        }));
+
+        orch.store_environmental_report(&soil, DataTier::Hot).await.unwrap();
+        orch.store_environmental_report(&ocean, DataTier::Hot).await.unwrap();
+        orch.store_environmental_report(&hydro, DataTier::Hot).await.unwrap();
+
+        assert_eq!(orch.query_domain_index(&EnvironmentalDomain::Soil).len(), 1);
+        assert_eq!(orch.query_domain_index(&EnvironmentalDomain::Ocean).len(), 1);
+        assert_eq!(orch.query_domain_index(&EnvironmentalDomain::Hydrology).len(), 1);
+        assert_eq!(orch.domain_index_total(), 3);
     }
 }
