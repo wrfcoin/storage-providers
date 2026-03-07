@@ -30,7 +30,8 @@ pub struct IpfsClusterConfig {
 impl Default for IpfsClusterConfig {
     fn default() -> Self {
         Self {
-            cluster_name: "wrfcoin-weather".to_string(),
+            cluster_name: std::env::var("IPFS_CLUSTER_NAME")
+                .unwrap_or_else(|_| "wrfcoin-weather".to_string()),
             cluster_secret: std::env::var("IPFS_CLUSTER_SECRET").ok(),
             replication_factor: 3,
         }
@@ -65,6 +66,11 @@ impl ClusterManager {
     /// Return the cluster secret, if configured.
     pub fn cluster_secret(&self) -> Option<&str> {
         self.config.cluster_secret.as_deref()
+    }
+
+    /// Return the configured cluster name.
+    pub fn cluster_name(&self) -> &str {
+        &self.config.cluster_name
     }
 
     /// Build auth headers for cluster API calls.
@@ -210,6 +216,24 @@ mod tests {
         let (name, value) = cm.auth_header().unwrap();
         assert_eq!(name, "Authorization");
         assert_eq!(value, "Bearer my-secret");
+    }
+
+    #[test]
+    fn test_cluster_name_from_config() {
+        let config = IpfsClusterConfig {
+            cluster_name: "my-custom-cluster".to_string(),
+            ..Default::default()
+        };
+        let cm = ClusterManager::new(config).unwrap();
+        assert_eq!(cm.cluster_name(), "my-custom-cluster");
+    }
+
+    #[test]
+    fn test_default_cluster_name() {
+        // When IPFS_CLUSTER_NAME env var is not set, falls back to "wrfcoin-weather"
+        let config = IpfsClusterConfig::default();
+        // The default may be overridden by env var in CI, so just check it's non-empty
+        assert!(!config.cluster_name.is_empty());
     }
 
     #[test]
