@@ -236,6 +236,56 @@ pub struct SoilPayload {
     pub depth_cm: Option<f64>,
 }
 
+impl SoilPayload {
+    /// Validate physical bounds of soil observation fields.
+    ///
+    /// Skips any field that is `None`. Returns an error describing the first
+    /// out-of-range field encountered.
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(v) = self.moisture_pct {
+            if !(0.0..=100.0).contains(&v) {
+                return Err(format!("moisture_pct {v} is out of range [0.0, 100.0]"));
+            }
+        }
+        if let Some(v) = self.ph {
+            if !(0.0..=14.0).contains(&v) {
+                return Err(format!("ph {v} is out of range [0.0, 14.0]"));
+            }
+        }
+        if let Some(v) = self.organic_carbon_pct {
+            if !(0.0..=100.0).contains(&v) {
+                return Err(format!("organic_carbon_pct {v} is out of range [0.0, 100.0]"));
+            }
+        }
+        if let Some(v) = self.depth_cm {
+            if v < 0.0 {
+                return Err(format!("depth_cm {v} must be non-negative"));
+            }
+        }
+        if let Some(v) = self.nitrogen_mgl {
+            if v < 0.0 {
+                return Err(format!("nitrogen_mgl {v} must be non-negative"));
+            }
+        }
+        if let Some(v) = self.phosphorus_mgl {
+            if v < 0.0 {
+                return Err(format!("phosphorus_mgl {v} must be non-negative"));
+            }
+        }
+        if let Some(v) = self.potassium_mgl {
+            if v < 0.0 {
+                return Err(format!("potassium_mgl {v} must be non-negative"));
+            }
+        }
+        if let Some(v) = self.conductivity_dsm {
+            if v < 0.0 {
+                return Err(format!("conductivity_dsm {v} must be non-negative"));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Ocean observation payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OceanPayload {
@@ -250,6 +300,56 @@ pub struct OceanPayload {
     pub depth_m: Option<f64>,
 }
 
+impl OceanPayload {
+    /// Validate physical bounds of ocean observation fields.
+    ///
+    /// Skips any field that is `None`. Returns an error describing the first
+    /// out-of-range field encountered.
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(v) = self.salinity_psu {
+            if !(0.0..=50.0).contains(&v) {
+                return Err(format!("salinity_psu {v} is out of range [0.0, 50.0]"));
+            }
+        }
+        if let Some(v) = self.current_direction_deg {
+            if v > 360 {
+                return Err(format!("current_direction_deg {v} is out of range [0, 360]"));
+            }
+        }
+        if let Some(v) = self.wave_height_m {
+            if v < 0.0 {
+                return Err(format!("wave_height_m {v} must be non-negative"));
+            }
+        }
+        if let Some(v) = self.wave_period_s {
+            if v < 0.0 {
+                return Err(format!("wave_period_s {v} must be non-negative"));
+            }
+        }
+        if let Some(v) = self.current_speed_ms {
+            if v < 0.0 {
+                return Err(format!("current_speed_ms {v} must be non-negative"));
+            }
+        }
+        if let Some(v) = self.chlorophyll_a_mgl {
+            if v < 0.0 {
+                return Err(format!("chlorophyll_a_mgl {v} must be non-negative"));
+            }
+        }
+        if let Some(v) = self.dissolved_oxygen_mgl {
+            if v < 0.0 {
+                return Err(format!("dissolved_oxygen_mgl {v} must be non-negative"));
+            }
+        }
+        if let Some(v) = self.depth_m {
+            if v < 0.0 {
+                return Err(format!("depth_m {v} must be non-negative"));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Hydrology observation payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HydrologyPayload {
@@ -261,6 +361,43 @@ pub struct HydrologyPayload {
     pub reservoir_storage_pct: Option<f64>,
     pub flood_risk_level: Option<u8>,
     pub drought_index: Option<f64>,
+}
+
+impl HydrologyPayload {
+    /// Validate physical bounds of hydrology observation fields.
+    ///
+    /// Skips any field that is `None`. Returns an error describing the first
+    /// out-of-range field encountered.
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(v) = self.reservoir_storage_pct {
+            if !(0.0..=100.0).contains(&v) {
+                return Err(format!(
+                    "reservoir_storage_pct {v} is out of range [0.0, 100.0]"
+                ));
+            }
+        }
+        if let Some(v) = self.flood_risk_level {
+            if v > 5 {
+                return Err(format!("flood_risk_level {v} is out of range [0, 5]"));
+            }
+        }
+        if let Some(v) = self.river_discharge_m3s {
+            if v < 0.0 {
+                return Err(format!("river_discharge_m3s {v} must be non-negative"));
+            }
+        }
+        if let Some(v) = self.flow_velocity_ms {
+            if v < 0.0 {
+                return Err(format!("flow_velocity_ms {v} must be non-negative"));
+            }
+        }
+        if let Some(v) = self.sediment_load_mgl {
+            if v < 0.0 {
+                return Err(format!("sediment_load_mgl {v} must be non-negative"));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Domain-specific payload variants for environmental reports.
@@ -338,6 +475,13 @@ impl EnvironmentalReport {
                     "quality_score {score} is out of range [0.0, 1.0]"
                 ));
             }
+        }
+        // Validate domain-specific payload bounds.
+        match &self.payload {
+            ReportPayload::Soil(p) => p.validate()?,
+            ReportPayload::Ocean(p) => p.validate()?,
+            ReportPayload::Hydrology(p) => p.validate()?,
+            _ => {} // Other domains: no bounds validation yet
         }
         Ok(())
     }
@@ -895,5 +1039,287 @@ mod tests {
         report.domain = EnvironmentalDomain::Soil;
         let err = report.validate().unwrap_err();
         assert!(err.contains("domain"));
+    }
+
+    // ---- SoilPayload::validate() tests ----
+
+    #[test]
+    fn test_soil_payload_validate_valid() {
+        let p = SoilPayload {
+            moisture_pct: Some(32.5),
+            temperature_c: Some(18.0),
+            ph: Some(6.8),
+            organic_carbon_pct: Some(2.1),
+            nitrogen_mgl: Some(15.0),
+            phosphorus_mgl: Some(8.5),
+            potassium_mgl: Some(120.0),
+            conductivity_dsm: Some(0.45),
+            depth_cm: Some(10.0),
+        };
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn test_soil_payload_validate_all_none() {
+        let p = SoilPayload {
+            moisture_pct: None,
+            temperature_c: None,
+            ph: None,
+            organic_carbon_pct: None,
+            nitrogen_mgl: None,
+            phosphorus_mgl: None,
+            potassium_mgl: None,
+            conductivity_dsm: None,
+            depth_cm: None,
+        };
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn test_soil_payload_validate_ph_out_of_range() {
+        let p = SoilPayload {
+            moisture_pct: None,
+            temperature_c: None,
+            ph: Some(15.0),
+            organic_carbon_pct: None,
+            nitrogen_mgl: None,
+            phosphorus_mgl: None,
+            potassium_mgl: None,
+            conductivity_dsm: None,
+            depth_cm: None,
+        };
+        let err = p.validate().unwrap_err();
+        assert!(err.contains("ph"), "expected error to mention 'ph', got: {err}");
+    }
+
+    #[test]
+    fn test_soil_payload_validate_moisture_out_of_range() {
+        let p = SoilPayload {
+            moisture_pct: Some(150.0),
+            temperature_c: None,
+            ph: None,
+            organic_carbon_pct: None,
+            nitrogen_mgl: None,
+            phosphorus_mgl: None,
+            potassium_mgl: None,
+            conductivity_dsm: None,
+            depth_cm: None,
+        };
+        let err = p.validate().unwrap_err();
+        assert!(err.contains("moisture"), "expected error to mention 'moisture', got: {err}");
+    }
+
+    #[test]
+    fn test_soil_payload_validate_negative_depth() {
+        let p = SoilPayload {
+            moisture_pct: None,
+            temperature_c: None,
+            ph: None,
+            organic_carbon_pct: None,
+            nitrogen_mgl: None,
+            phosphorus_mgl: None,
+            potassium_mgl: None,
+            conductivity_dsm: None,
+            depth_cm: Some(-5.0),
+        };
+        let err = p.validate().unwrap_err();
+        assert!(err.contains("depth"), "expected error to mention 'depth', got: {err}");
+    }
+
+    // ---- OceanPayload::validate() tests ----
+
+    #[test]
+    fn test_ocean_payload_validate_valid() {
+        let p = OceanPayload {
+            sea_surface_temperature_c: Some(28.3),
+            salinity_psu: Some(35.2),
+            wave_height_m: Some(1.8),
+            wave_period_s: Some(9.5),
+            current_speed_ms: Some(0.4),
+            current_direction_deg: Some(180),
+            chlorophyll_a_mgl: Some(0.25),
+            dissolved_oxygen_mgl: Some(7.1),
+            depth_m: Some(0.5),
+        };
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn test_ocean_payload_validate_all_none() {
+        let p = OceanPayload {
+            sea_surface_temperature_c: None,
+            salinity_psu: None,
+            wave_height_m: None,
+            wave_period_s: None,
+            current_speed_ms: None,
+            current_direction_deg: None,
+            chlorophyll_a_mgl: None,
+            dissolved_oxygen_mgl: None,
+            depth_m: None,
+        };
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn test_ocean_payload_validate_salinity_out_of_range() {
+        let p = OceanPayload {
+            sea_surface_temperature_c: None,
+            salinity_psu: Some(60.0),
+            wave_height_m: None,
+            wave_period_s: None,
+            current_speed_ms: None,
+            current_direction_deg: None,
+            chlorophyll_a_mgl: None,
+            dissolved_oxygen_mgl: None,
+            depth_m: None,
+        };
+        let err = p.validate().unwrap_err();
+        assert!(err.contains("salinity"), "expected error to mention 'salinity', got: {err}");
+    }
+
+    #[test]
+    fn test_ocean_payload_validate_negative_wave_height() {
+        let p = OceanPayload {
+            sea_surface_temperature_c: None,
+            salinity_psu: None,
+            wave_height_m: Some(-1.0),
+            wave_period_s: None,
+            current_speed_ms: None,
+            current_direction_deg: None,
+            chlorophyll_a_mgl: None,
+            dissolved_oxygen_mgl: None,
+            depth_m: None,
+        };
+        let err = p.validate().unwrap_err();
+        assert!(err.contains("wave_height"), "expected error to mention 'wave_height', got: {err}");
+    }
+
+    #[test]
+    fn test_ocean_payload_validate_direction_over_360() {
+        let p = OceanPayload {
+            sea_surface_temperature_c: None,
+            salinity_psu: None,
+            wave_height_m: None,
+            wave_period_s: None,
+            current_speed_ms: None,
+            current_direction_deg: Some(361),
+            chlorophyll_a_mgl: None,
+            dissolved_oxygen_mgl: None,
+            depth_m: None,
+        };
+        let err = p.validate().unwrap_err();
+        assert!(err.contains("current_direction"), "expected error to mention 'current_direction', got: {err}");
+    }
+
+    // ---- HydrologyPayload::validate() tests ----
+
+    #[test]
+    fn test_hydrology_payload_validate_valid() {
+        let p = HydrologyPayload {
+            river_discharge_m3s: Some(1250.0),
+            water_level_m: Some(4.3),
+            flow_velocity_ms: Some(0.85),
+            sediment_load_mgl: Some(320.0),
+            groundwater_level_m: Some(2.1),
+            reservoir_storage_pct: Some(72.0),
+            flood_risk_level: Some(2),
+            drought_index: Some(-0.5),
+        };
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn test_hydrology_payload_validate_all_none() {
+        let p = HydrologyPayload {
+            river_discharge_m3s: None,
+            water_level_m: None,
+            flow_velocity_ms: None,
+            sediment_load_mgl: None,
+            groundwater_level_m: None,
+            reservoir_storage_pct: None,
+            flood_risk_level: None,
+            drought_index: None,
+        };
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn test_hydrology_payload_validate_reservoir_over_100() {
+        let p = HydrologyPayload {
+            river_discharge_m3s: None,
+            water_level_m: None,
+            flow_velocity_ms: None,
+            sediment_load_mgl: None,
+            groundwater_level_m: None,
+            reservoir_storage_pct: Some(110.0),
+            flood_risk_level: None,
+            drought_index: None,
+        };
+        let err = p.validate().unwrap_err();
+        assert!(err.contains("reservoir_storage"), "expected error to mention 'reservoir_storage', got: {err}");
+    }
+
+    #[test]
+    fn test_hydrology_payload_validate_flood_risk_over_5() {
+        let p = HydrologyPayload {
+            river_discharge_m3s: None,
+            water_level_m: None,
+            flow_velocity_ms: None,
+            sediment_load_mgl: None,
+            groundwater_level_m: None,
+            reservoir_storage_pct: None,
+            flood_risk_level: Some(6),
+            drought_index: None,
+        };
+        let err = p.validate().unwrap_err();
+        assert!(err.contains("flood_risk"), "expected error to mention 'flood_risk', got: {err}");
+    }
+
+    #[test]
+    fn test_hydrology_payload_validate_negative_discharge() {
+        let p = HydrologyPayload {
+            river_discharge_m3s: Some(-10.0),
+            water_level_m: None,
+            flow_velocity_ms: None,
+            sediment_load_mgl: None,
+            groundwater_level_m: None,
+            reservoir_storage_pct: None,
+            flood_risk_level: None,
+            drought_index: None,
+        };
+        let err = p.validate().unwrap_err();
+        assert!(err.contains("river_discharge"), "expected error to mention 'river_discharge', got: {err}");
+    }
+
+    // ---- EnvironmentalReport::validate() payload wiring tests ----
+
+    #[test]
+    fn test_report_validate_rejects_invalid_soil_payload() {
+        let mut report = sample_soil_report();
+        if let ReportPayload::Soil(ref mut p) = report.payload {
+            p.ph = Some(20.0);
+        }
+        let err = report.validate().unwrap_err();
+        assert!(err.contains("ph"));
+    }
+
+    #[test]
+    fn test_report_validate_rejects_invalid_ocean_payload() {
+        let mut report = sample_ocean_report();
+        if let ReportPayload::Ocean(ref mut p) = report.payload {
+            p.salinity_psu = Some(-5.0);
+        }
+        let err = report.validate().unwrap_err();
+        assert!(err.contains("salinity"));
+    }
+
+    #[test]
+    fn test_report_validate_rejects_invalid_hydrology_payload() {
+        let mut report = sample_hydrology_report();
+        if let ReportPayload::Hydrology(ref mut p) = report.payload {
+            p.reservoir_storage_pct = Some(200.0);
+        }
+        let err = report.validate().unwrap_err();
+        assert!(err.contains("reservoir_storage"));
     }
 }

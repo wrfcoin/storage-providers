@@ -1,4 +1,5 @@
 pub mod compression;
+pub mod domain_index;
 pub mod error;
 pub mod failover;
 pub mod hashing;
@@ -9,6 +10,7 @@ pub mod traits;
 pub mod types;
 
 pub use compression::{compress, decompress, is_compressed};
+pub use domain_index::{DomainContentIndex, IndexEntry};
 pub use error::StorageError;
 pub use failover::{CircuitBreaker, CircuitState, FailoverMetrics, FailoverRouter};
 pub use hashing::{arweave_content_id, filecoin_content_id, ipfs_content_id, sha256_digest};
