@@ -15,6 +15,58 @@ impl RetentionManager {
         }
     }
 
+    /// Create a retention manager pre-loaded with default policies for all
+    /// environmental observation domains.
+    pub fn with_environmental_defaults() -> Self {
+        let mut mgr = Self::new();
+
+        // Weather — high volume, moderate retention
+        let mut weather = RetentionPolicy::new("weather.observation", DataTier::Cold, 2);
+        weather.max_age_secs = 180 * 86400; // 180 days
+        mgr.add_policy(weather);
+
+        // Air quality — regulatory value, longer retention
+        let mut aq = RetentionPolicy::new("air_quality.observation", DataTier::Cold, 2);
+        aq.max_age_secs = 365 * 86400; // 1 year
+        mgr.add_policy(aq);
+
+        // Water quality — environmental monitoring
+        let mut wq = RetentionPolicy::new("water_quality.observation", DataTier::Cold, 2);
+        wq.max_age_secs = 365 * 86400;
+        mgr.add_policy(wq);
+
+        // Wildfire — critical safety data
+        let mut wildfire = RetentionPolicy::new("wildfire.observation", DataTier::Cold, 3);
+        wildfire.max_age_secs = 365 * 86400;
+        mgr.add_policy(wildfire);
+
+        // Soil — long-term agricultural/climate value
+        let mut soil = RetentionPolicy::new("soil.observation", DataTier::Cold, 2);
+        soil.max_age_secs = 0; // never expires
+        mgr.add_policy(soil);
+        let mut soil_archive = RetentionPolicy::new("soil.observation", DataTier::Archive, 2);
+        soil_archive.max_age_secs = 0;
+        mgr.add_policy(soil_archive);
+
+        // Ocean — climate science, long-term
+        let mut ocean = RetentionPolicy::new("ocean.observation", DataTier::Cold, 2);
+        ocean.max_age_secs = 0; // never expires
+        mgr.add_policy(ocean);
+        let mut ocean_archive = RetentionPolicy::new("ocean.observation", DataTier::Archive, 2);
+        ocean_archive.max_age_secs = 0;
+        mgr.add_policy(ocean_archive);
+
+        // Hydrology — flood risk, high redundancy
+        let mut hydro = RetentionPolicy::new("hydrology.observation", DataTier::Cold, 3);
+        hydro.max_age_secs = 0; // never expires
+        mgr.add_policy(hydro);
+        let mut hydro_archive = RetentionPolicy::new("hydrology.observation", DataTier::Archive, 3);
+        hydro_archive.max_age_secs = 0;
+        mgr.add_policy(hydro_archive);
+
+        mgr
+    }
+
     /// Add a retention policy.
     pub fn add_policy(&mut self, policy: RetentionPolicy) {
         self.policies.push(policy);
@@ -150,5 +202,42 @@ mod tests {
 
         // Policy is for Archive tier, querying Hot tier should default to retain
         assert!(mgr.should_retain("forecast", &DataTier::Hot, 99999, 0.5));
+    }
+
+    #[test]
+    fn test_environmental_defaults_include_soil() {
+        let mgr = RetentionManager::with_environmental_defaults();
+        let policies = mgr.policies_for("soil.observation");
+        assert!(!policies.is_empty());
+        assert!(policies[0].min_copies >= 2);
+    }
+
+    #[test]
+    fn test_environmental_defaults_include_ocean() {
+        let mgr = RetentionManager::with_environmental_defaults();
+        let policies = mgr.policies_for("ocean.observation");
+        assert!(!policies.is_empty());
+    }
+
+    #[test]
+    fn test_environmental_defaults_include_hydrology() {
+        let mgr = RetentionManager::with_environmental_defaults();
+        let policies = mgr.policies_for("hydrology.observation");
+        assert!(!policies.is_empty());
+    }
+
+    #[test]
+    fn test_environmental_defaults_soil_long_retention() {
+        let mgr = RetentionManager::with_environmental_defaults();
+        let policies = mgr.policies_for("soil.observation");
+        // Soil data is valuable long-term — max_age_secs should be >= 1 year or 0 (never expires)
+        assert!(policies.iter().any(|p| p.max_age_secs == 0 || p.max_age_secs >= 365 * 86400));
+    }
+
+    #[test]
+    fn test_environmental_defaults_hydrology_min_copies() {
+        let mgr = RetentionManager::with_environmental_defaults();
+        // Hydrology (flood risk) data needs redundancy
+        assert!(mgr.min_copies_for("hydrology.observation") >= 3);
     }
 }
