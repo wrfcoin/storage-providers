@@ -476,6 +476,13 @@ impl EnvironmentalReport {
                 ));
             }
         }
+        // Validate domain-specific payload bounds.
+        match &self.payload {
+            ReportPayload::Soil(p) => p.validate()?,
+            ReportPayload::Ocean(p) => p.validate()?,
+            ReportPayload::Hydrology(p) => p.validate()?,
+            _ => {} // Other domains: no bounds validation yet
+        }
         Ok(())
     }
 }
@@ -1282,5 +1289,37 @@ mod tests {
         };
         let err = p.validate().unwrap_err();
         assert!(err.contains("river_discharge"), "expected error to mention 'river_discharge', got: {err}");
+    }
+
+    // ---- EnvironmentalReport::validate() payload wiring tests ----
+
+    #[test]
+    fn test_report_validate_rejects_invalid_soil_payload() {
+        let mut report = sample_soil_report();
+        if let ReportPayload::Soil(ref mut p) = report.payload {
+            p.ph = Some(20.0);
+        }
+        let err = report.validate().unwrap_err();
+        assert!(err.contains("ph"));
+    }
+
+    #[test]
+    fn test_report_validate_rejects_invalid_ocean_payload() {
+        let mut report = sample_ocean_report();
+        if let ReportPayload::Ocean(ref mut p) = report.payload {
+            p.salinity_psu = Some(-5.0);
+        }
+        let err = report.validate().unwrap_err();
+        assert!(err.contains("salinity"));
+    }
+
+    #[test]
+    fn test_report_validate_rejects_invalid_hydrology_payload() {
+        let mut report = sample_hydrology_report();
+        if let ReportPayload::Hydrology(ref mut p) = report.payload {
+            p.reservoir_storage_pct = Some(200.0);
+        }
+        let err = report.validate().unwrap_err();
+        assert!(err.contains("reservoir_storage"));
     }
 }
