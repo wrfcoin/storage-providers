@@ -168,10 +168,12 @@ impl DataTieringOrchestrator {
     }
 
     /// Verify provenance chain integrity for accepted content.
-    pub fn validate_provenance_chain(&self, chain: &ProvenanceChain) -> ProvenanceValidationResult {
-        let policy = self.provenance_policy.read().unwrap().clone();
+    pub fn validate_provenance_chain(&self, chain: &ProvenanceChain) -> Result<ProvenanceValidationResult, StorageError> {
+        let policy = self.provenance_policy.read()
+            .map_err(|e| StorageError::Internal(format!("lock poisoned: {e}")))?
+            .clone();
         let validator = ProvenanceValidator::new(policy);
-        validator.validate_chain(chain)
+        Ok(validator.validate_chain(chain))
     }
 
     /// Store content with provenance-first enforcement. Invalid chains are quarantined.
@@ -182,7 +184,7 @@ impl DataTieringOrchestrator {
         metadata: &Metadata,
         chain: &ProvenanceChain,
     ) -> Result<(AdmissionDecision, Option<ContentId>), StorageError> {
-        let validation = self.validate_provenance_chain(chain);
+        let validation = self.validate_provenance_chain(chain)?;
         if validation.valid {
             let id = self.store_with_tier(tier, data, metadata).await?;
             return Ok((AdmissionDecision::Accepted, Some(id)));
@@ -194,7 +196,8 @@ impl DataTieringOrchestrator {
             .as_secs();
         let quarantine_id = format!("q-{}-{}", now, chain.chain_id);
         {
-            let mut guard = self.quarantine_records.write().unwrap();
+            let mut guard = self.quarantine_records.write()
+                .map_err(|e| StorageError::Internal(format!("lock poisoned: {e}")))?;
             guard.insert(
                 quarantine_id.clone(),
                 QuarantineRecord {
@@ -217,9 +220,11 @@ impl DataTieringOrchestrator {
     }
 
     /// Replace the active provenance policy.
-    pub fn set_provenance_policy(&self, policy: ProvenancePolicy) {
-        let mut guard = self.provenance_policy.write().unwrap();
+    pub fn set_provenance_policy(&self, policy: ProvenancePolicy) -> Result<(), StorageError> {
+        let mut guard = self.provenance_policy.write()
+            .map_err(|e| StorageError::Internal(format!("lock poisoned: {e}")))?;
         *guard = policy;
+        Ok(())
     }
 
     /// Validate `chain` against the active `ProvenancePolicy` in addition to
@@ -228,7 +233,9 @@ impl DataTieringOrchestrator {
     /// Returns `Ok(())` when the chain satisfies all policy constraints,
     /// otherwise `Err` with a human-readable reason.
     fn validate_chain_with_policy(&self, chain: &ProvenanceChain) -> Result<(), String> {
-        let policy = self.provenance_policy.read().unwrap().clone();
+        let policy = self.provenance_policy.read()
+            .map_err(|e| format!("lock poisoned: {e}"))?
+            .clone();
         let validator = ProvenanceValidator::new(policy);
         validator.validate_with_policy(chain)
     }
@@ -245,7 +252,9 @@ impl DataTieringOrchestrator {
         tier: &DataTier,
         provenance_chain: Option<&ProvenanceChain>,
     ) -> Result<AdmissionDecision, StorageError> {
-        let require = self.provenance_policy.read().unwrap().require_provenance;
+        let require = self.provenance_policy.read()
+            .map_err(|e| StorageError::Internal(format!("lock poisoned: {e}")))?
+            .require_provenance;
 
         let chain = match provenance_chain {
             Some(c) => c,
@@ -271,7 +280,8 @@ impl DataTieringOrchestrator {
                     .as_secs();
                 let quarantine_id = format!("q-{}-{}", now, chain.chain_id);
                 {
-                    let mut guard = self.quarantine_records.write().unwrap();
+                    let mut guard = self.quarantine_records.write()
+                        .map_err(|e| StorageError::Internal(format!("lock poisoned: {e}")))?;
                     guard.insert(
                         quarantine_id.clone(),
                         QuarantineRecord {
@@ -328,28 +338,30 @@ impl DataTieringOrchestrator {
     }
 
     /// Return quarantine records for synthetic-content review workflows.
-    pub fn list_quarantine_records(&self) -> Vec<QuarantineRecord> {
-        self.quarantine_records
+    pub fn list_quarantine_records(&self) -> Result<Vec<QuarantineRecord>, StorageError> {
+        Ok(self.quarantine_records
             .read()
-            .unwrap()
+            .map_err(|e| StorageError::Internal(format!("lock poisoned: {e}")))?
             .values()
             .cloned()
-            .collect()
+            .collect())
     }
 
     /// Mark quarantined content as reinstated following review.
-    pub fn reinstate_quarantine(&self, quarantine_id: &str) -> bool {
-        let mut guard = self.quarantine_records.write().unwrap();
+    pub fn reinstate_quarantine(&self, quarantine_id: &str) -> Result<bool, StorageError> {
+        let mut guard = self.quarantine_records.write()
+            .map_err(|e| StorageError::Internal(format!("lock poisoned: {e}")))?;
         let Some(record) = guard.get_mut(quarantine_id) else {
-            return false;
+            return Ok(false);
         };
         record.reinstated = true;
-        true
+        Ok(true)
     }
 
     /// Configure minimum replicas for a public-interest report class.
-    pub fn set_public_interest_policy(&self, class: &str, min_replicas: u8) {
-        let mut guard = self.public_interest_policies.write().unwrap();
+    pub fn set_public_interest_policy(&self, class: &str, min_replicas: u8) -> Result<(), StorageError> {
+        let mut guard = self.public_interest_policies.write()
+            .map_err(|e| StorageError::Internal(format!("lock poisoned: {e}")))?;
         guard.insert(
             class.to_string(),
             PublicInterestAvailabilityPolicy {
@@ -357,6 +369,7 @@ impl DataTieringOrchestrator {
                 min_replicas: min_replicas.max(1),
             },
         );
+        Ok(())
     }
 
     /// Store public-interest content across tiers and compute SLA status.
@@ -367,7 +380,7 @@ impl DataTieringOrchestrator {
         metadata: &Metadata,
         chain: &ProvenanceChain,
     ) -> Result<PublicInterestStoreResult, StorageError> {
-        let validation = self.validate_provenance_chain(chain);
+        let validation = self.validate_provenance_chain(chain)?;
         if !validation.valid {
             let _ = self
                 .store_verified_with_tier(&DataTier::Archive, data, metadata, chain)
@@ -378,7 +391,7 @@ impl DataTieringOrchestrator {
         let target_replicas = self
             .public_interest_policies
             .read()
-            .unwrap()
+            .map_err(|e| StorageError::Internal(format!("lock poisoned: {e}")))?
             .get(class)
             .map(|p| p.min_replicas)
             .unwrap_or(3);
@@ -682,7 +695,7 @@ mod tests {
             .unwrap();
         assert_eq!(decision, AdmissionDecision::Quarantined);
         assert!(cid.is_some(), "quarantined content should be persisted in archive when available");
-        assert_eq!(orch.list_quarantine_records().len(), 1);
+        assert_eq!(orch.list_quarantine_records().unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -691,7 +704,7 @@ mod tests {
         orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
         orch.register_tier(DataTier::Warm, Box::new(MockProvider::new("warm")));
         orch.register_tier(DataTier::Cold, Box::new(MockProvider::new("cold")));
-        orch.set_public_interest_policy("public_interest.weather", 3);
+        orch.set_public_interest_policy("public_interest.weather", 3).unwrap();
 
         let result = orch
             .store_public_interest_with_sla(
@@ -757,7 +770,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(decision, AdmissionDecision::Quarantined);
-        assert_eq!(orch.list_quarantine_records().len(), 1);
+        assert_eq!(orch.list_quarantine_records().unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -789,7 +802,7 @@ mod tests {
             require_provenance: true,
             min_chain_length: 3,
             allowed_algorithms: Vec::new(),
-        });
+        }).unwrap();
 
         let decision = orch
             .store_with_provenance_enforcement(
@@ -815,7 +828,7 @@ mod tests {
             require_provenance: true,
             min_chain_length: 1,
             allowed_algorithms: vec!["secp256k1".to_string()],
-        });
+        }).unwrap();
 
         let decision = orch
             .store_with_provenance_enforcement(
@@ -840,7 +853,7 @@ mod tests {
             require_provenance: false,
             min_chain_length: 0,
             allowed_algorithms: Vec::new(),
-        });
+        }).unwrap();
 
         let decision = orch
             .store_with_provenance_enforcement(
