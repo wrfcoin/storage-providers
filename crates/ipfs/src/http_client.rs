@@ -27,11 +27,22 @@ pub struct IdResponse {
 pub struct KuboClient {
     client: Client,
     base_url: String,
+    /// Optional bearer token for API authentication.
+    api_token: Option<String>,
 }
 
 impl KuboClient {
     /// Create a new Kubo client from IPFS config.
+    ///
+    /// Returns an error if `api_token` is `Some("")` (fail-closed on empty tokens).
     pub fn new(config: &IpfsConfig) -> Result<Self, StorageError> {
+        if let Some(ref token) = config.api_token {
+            if token.is_empty() {
+                return Err(StorageError::ConfigError(
+                    "IPFS API token is configured but empty — refusing to proceed".to_string(),
+                ));
+            }
+        }
         let client = Client::builder()
             .timeout(Duration::from_secs(config.timeout_secs))
             .pool_max_idle_per_host(config.max_connections as usize)
@@ -40,7 +51,17 @@ impl KuboClient {
         Ok(Self {
             client,
             base_url: config.api_url.clone(),
+            api_token: config.api_token.clone(),
         })
+    }
+
+    /// Return a request builder with auth header attached (if token is configured).
+    fn post(&self, url: &str) -> reqwest::RequestBuilder {
+        let mut req = self.client.post(url);
+        if let Some(ref token) = self.api_token {
+            req = req.header("Authorization", format!("Bearer {token}"));
+        }
+        req
     }
 
     /// Upload data to IPFS via `POST /api/v0/add`.
@@ -49,7 +70,6 @@ impl KuboClient {
         let part = reqwest::multipart::Part::bytes(data).file_name("data");
         let form = reqwest::multipart::Form::new().part("file", part);
         let resp = self
-            .client
             .post(&url)
             .multipart(form)
             .send()
@@ -70,7 +90,6 @@ impl KuboClient {
     pub async fn cat(&self, cid: &str) -> Result<Vec<u8>, StorageError> {
         let url = format!("{}/api/v0/cat?arg={}", self.base_url, cid);
         let resp = self
-            .client
             .post(&url)
             .send()
             .await
@@ -91,7 +110,6 @@ impl KuboClient {
     pub async fn pin_add(&self, cid: &str) -> Result<(), StorageError> {
         let url = format!("{}/api/v0/pin/add?arg={}", self.base_url, cid);
         let resp = self
-            .client
             .post(&url)
             .send()
             .await
@@ -109,7 +127,6 @@ impl KuboClient {
     pub async fn pin_rm(&self, cid: &str) -> Result<(), StorageError> {
         let url = format!("{}/api/v0/pin/rm?arg={}", self.base_url, cid);
         let resp = self
-            .client
             .post(&url)
             .send()
             .await
@@ -127,7 +144,6 @@ impl KuboClient {
     pub async fn id(&self) -> Result<IdResponse, StorageError> {
         let url = format!("{}/api/v0/id", self.base_url);
         let resp = self
-            .client
             .post(&url)
             .send()
             .await
@@ -153,6 +169,38 @@ mod tests {
         let config = IpfsConfig::default();
         let client = KuboClient::new(&config);
         assert!(client.is_ok());
+    }
+
+    #[test]
+    fn test_kubo_client_rejects_empty_token() {
+        let config = IpfsConfig {
+            api_token: Some("".to_string()),
+            ..Default::default()
+        };
+        let result = KuboClient::new(&config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_kubo_client_accepts_valid_token() {
+        let config = IpfsConfig {
+            api_token: Some("secret-token".to_string()),
+            ..Default::default()
+        };
+        let client = KuboClient::new(&config);
+        assert!(client.is_ok());
+        assert_eq!(client.unwrap().api_token.as_deref(), Some("secret-token"));
+    }
+
+    #[test]
+    fn test_kubo_client_accepts_no_token() {
+        let config = IpfsConfig {
+            api_token: None,
+            ..Default::default()
+        };
+        let client = KuboClient::new(&config);
+        assert!(client.is_ok());
+        assert!(client.unwrap().api_token.is_none());
     }
 
     #[test]
