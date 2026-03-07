@@ -16,6 +16,25 @@ pub struct ClusterPeer {
     pub capabilities: Vec<String>,
 }
 
+impl ClusterPeer {
+    /// Validate that coordinates are within valid ranges and not NaN/infinite.
+    pub fn validate(&self) -> Result<(), StorageError> {
+        if !self.latitude.is_finite() || self.latitude < -90.0 || self.latitude > 90.0 {
+            return Err(StorageError::ConfigError(format!(
+                "invalid latitude {}: must be between -90 and 90",
+                self.latitude
+            )));
+        }
+        if !self.longitude.is_finite() || self.longitude < -180.0 || self.longitude > 180.0 {
+            return Err(StorageError::ConfigError(format!(
+                "invalid longitude {}: must be between -180 and 180",
+                self.longitude
+            )));
+        }
+        Ok(())
+    }
+}
+
 /// Configuration for an IPFS cluster deployment.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IpfsClusterConfig {
@@ -83,8 +102,10 @@ impl ClusterManager {
     }
 
     /// Add a peer to the cluster.
-    pub fn add_peer(&mut self, peer: ClusterPeer) {
+    pub fn add_peer(&mut self, peer: ClusterPeer) -> Result<(), StorageError> {
+        peer.validate()?;
         self.peers.push(peer);
+        Ok(())
     }
 
     /// Remove a peer by its identifier. Returns `true` if the peer was found and removed.
@@ -145,15 +166,15 @@ mod tests {
     #[test]
     fn test_add_and_list_peers() {
         let mut cm = ClusterManager::new(IpfsClusterConfig::default()).unwrap();
-        cm.add_peer(peer("peer-1", 40.0, -74.0));
-        cm.add_peer(peer("peer-2", 51.0, 0.0));
+        cm.add_peer(peer("peer-1", 40.0, -74.0)).unwrap();
+        cm.add_peer(peer("peer-2", 51.0, 0.0)).unwrap();
         assert_eq!(cm.peers().len(), 2);
     }
 
     #[test]
     fn test_remove_peer() {
         let mut cm = ClusterManager::new(IpfsClusterConfig::default()).unwrap();
-        cm.add_peer(peer("peer-1", 0.0, 0.0));
+        cm.add_peer(peer("peer-1", 0.0, 0.0)).unwrap();
         assert!(cm.remove_peer("peer-1"));
         assert_eq!(cm.peers().len(), 0);
         assert!(!cm.remove_peer("nonexistent"));
@@ -163,9 +184,9 @@ mod tests {
     fn test_select_peers_near_sorts_by_distance() {
         let config = IpfsClusterConfig { replication_factor: 2, ..Default::default() };
         let mut cm = ClusterManager::new(config).unwrap();
-        cm.add_peer(peer("far", 90.0, 90.0));
-        cm.add_peer(peer("near", 1.0, 1.0));
-        cm.add_peer(peer("medium", 10.0, 10.0));
+        cm.add_peer(peer("far", 90.0, 90.0)).unwrap();
+        cm.add_peer(peer("near", 1.0, 1.0)).unwrap();
+        cm.add_peer(peer("medium", 10.0, 10.0)).unwrap();
 
         let selected = cm.select_peers_near(0.0, 0.0);
         assert_eq!(selected.len(), 2);
@@ -244,5 +265,43 @@ mod tests {
         };
         let cm = ClusterManager::new(config).unwrap();
         assert!(cm.auth_header().is_none());
+    }
+
+    #[test]
+    fn test_add_peer_rejects_invalid_latitude() {
+        let mut cm = ClusterManager::new(IpfsClusterConfig::default()).unwrap();
+        let result = cm.add_peer(peer("bad-lat", 95.0, 0.0));
+        assert!(result.is_err());
+        assert_eq!(cm.peers().len(), 0);
+    }
+
+    #[test]
+    fn test_add_peer_rejects_invalid_longitude() {
+        let mut cm = ClusterManager::new(IpfsClusterConfig::default()).unwrap();
+        let result = cm.add_peer(peer("bad-lon", 0.0, 200.0));
+        assert!(result.is_err());
+        assert_eq!(cm.peers().len(), 0);
+    }
+
+    #[test]
+    fn test_add_peer_rejects_nan_coordinates() {
+        let mut cm = ClusterManager::new(IpfsClusterConfig::default()).unwrap();
+        let result = cm.add_peer(peer("nan", f64::NAN, 0.0));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_peer_rejects_infinite_coordinates() {
+        let mut cm = ClusterManager::new(IpfsClusterConfig::default()).unwrap();
+        let result = cm.add_peer(peer("inf", f64::INFINITY, 0.0));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_peer_accepts_boundary_values() {
+        let mut cm = ClusterManager::new(IpfsClusterConfig::default()).unwrap();
+        cm.add_peer(peer("north-pole", 90.0, 180.0)).unwrap();
+        cm.add_peer(peer("south-pole", -90.0, -180.0)).unwrap();
+        assert_eq!(cm.peers().len(), 2);
     }
 }
