@@ -20,12 +20,27 @@ impl StorageBudget {
     }
 
     /// Set a budget limit for a specific tier.
-    pub fn set_limit(&mut self, tier: DataTier, limit: f64) {
+    ///
+    /// Returns `Err` if `limit` is not finite or is negative.
+    pub fn set_limit(&mut self, tier: DataTier, limit: f64) -> Result<(), String> {
+        if !limit.is_finite() || limit < 0.0 {
+            return Err(format!(
+                "invalid budget limit for {tier:?}: {limit} (must be finite and non-negative)"
+            ));
+        }
         self.limits.insert(tier, limit);
+        Ok(())
     }
 
-    /// Record a cost for a tier. Returns `Err` if the budget would be exceeded.
+    /// Record a cost for a tier. Returns `Err` if the cost is invalid or the
+    /// budget would be exceeded.
     pub fn record_cost(&mut self, tier: DataTier, cost: f64) -> Result<(), String> {
+        if !cost.is_finite() || cost < 0.0 {
+            return Err(format!(
+                "invalid cost for {tier:?}: {cost} (must be finite and non-negative)"
+            ));
+        }
+
         let current = self.current_spend.get(&tier).copied().unwrap_or(0.0);
         let new_total = current + cost;
 
@@ -72,7 +87,7 @@ mod tests {
     #[test]
     fn test_budget_within_limit() {
         let mut budget = StorageBudget::new();
-        budget.set_limit(DataTier::Hot, 100.0);
+        budget.set_limit(DataTier::Hot, 100.0).unwrap();
         assert!(budget.record_cost(DataTier::Hot, 50.0).is_ok());
         assert!(budget.record_cost(DataTier::Hot, 30.0).is_ok());
     }
@@ -80,7 +95,7 @@ mod tests {
     #[test]
     fn test_budget_exceeds_limit() {
         let mut budget = StorageBudget::new();
-        budget.set_limit(DataTier::Hot, 100.0);
+        budget.set_limit(DataTier::Hot, 100.0).unwrap();
         budget.record_cost(DataTier::Hot, 80.0).unwrap();
         let result = budget.record_cost(DataTier::Hot, 30.0);
         assert!(result.is_err());
@@ -89,7 +104,7 @@ mod tests {
     #[test]
     fn test_budget_remaining() {
         let mut budget = StorageBudget::new();
-        budget.set_limit(DataTier::Warm, 100.0);
+        budget.set_limit(DataTier::Warm, 100.0).unwrap();
         budget.record_cost(DataTier::Warm, 40.0).unwrap();
         assert!((budget.remaining(&DataTier::Warm) - 60.0).abs() < f64::EPSILON);
     }
@@ -108,5 +123,41 @@ mod tests {
         budget.record_cost(DataTier::Hot, 10.0).unwrap();
         budget.record_cost(DataTier::Cold, 20.0).unwrap();
         assert!((budget.total_spend() - 30.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_record_cost_rejects_nan() {
+        let mut budget = StorageBudget::new();
+        assert!(budget.record_cost(DataTier::Hot, f64::NAN).is_err());
+    }
+
+    #[test]
+    fn test_record_cost_rejects_negative() {
+        let mut budget = StorageBudget::new();
+        assert!(budget.record_cost(DataTier::Hot, -1.0).is_err());
+    }
+
+    #[test]
+    fn test_record_cost_rejects_infinity() {
+        let mut budget = StorageBudget::new();
+        assert!(budget.record_cost(DataTier::Hot, f64::INFINITY).is_err());
+    }
+
+    #[test]
+    fn test_set_limit_rejects_nan() {
+        let mut budget = StorageBudget::new();
+        assert!(budget.set_limit(DataTier::Hot, f64::NAN).is_err());
+    }
+
+    #[test]
+    fn test_set_limit_rejects_negative() {
+        let mut budget = StorageBudget::new();
+        assert!(budget.set_limit(DataTier::Hot, -10.0).is_err());
+    }
+
+    #[test]
+    fn test_set_limit_rejects_infinity() {
+        let mut budget = StorageBudget::new();
+        assert!(budget.set_limit(DataTier::Hot, f64::INFINITY).is_err());
     }
 }
