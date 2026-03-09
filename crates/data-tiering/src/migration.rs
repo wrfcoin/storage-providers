@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use serde::{Deserialize, Serialize};
 use wrfcoin_storage_common::{ContentId, DataTier};
@@ -38,6 +38,9 @@ pub struct MigrationJob {
 pub struct MigrationScheduler {
     pending_jobs: VecDeque<MigrationJob>,
     completed_jobs: Vec<MigrationJob>,
+    pending_counts_by_content: HashMap<ContentId, usize>,
+    completed_status_by_content: HashMap<ContentId, MigrationStatus>,
+    status_by_content: HashMap<ContentId, MigrationStatus>,
     default_max_attempts: u32,
 }
 
@@ -47,6 +50,9 @@ impl MigrationScheduler {
         Self {
             pending_jobs: VecDeque::new(),
             completed_jobs: Vec::new(),
+            pending_counts_by_content: HashMap::new(),
+            completed_status_by_content: HashMap::new(),
+            status_by_content: HashMap::new(),
             default_max_attempts: 3,
         }
     }
@@ -56,12 +62,21 @@ impl MigrationScheduler {
         Self {
             pending_jobs: VecDeque::new(),
             completed_jobs: Vec::new(),
+            pending_counts_by_content: HashMap::new(),
+            completed_status_by_content: HashMap::new(),
+            status_by_content: HashMap::new(),
             default_max_attempts: max_attempts,
         }
     }
 
     /// Schedule a new migration job.
     pub fn schedule(&mut self, content_id: ContentId, from_tier: DataTier, to_tier: DataTier) {
+        *self
+            .pending_counts_by_content
+            .entry(content_id.clone())
+            .or_insert(0) += 1;
+        self.status_by_content
+            .insert(content_id.clone(), MigrationStatus::Pending);
         self.pending_jobs.push_back(MigrationJob {
             content_id,
             from_tier,
@@ -77,6 +92,18 @@ impl MigrationScheduler {
     /// Returns `None` if there are no pending jobs.
     pub fn execute_next(&mut self) -> Option<MigrationJob> {
         if let Some(mut job) = self.pending_jobs.pop_front() {
+            let content_id = job.content_id.clone();
+            if let Some(count) = self.pending_counts_by_content.get_mut(&content_id) {
+                *count -= 1;
+                if *count == 0 {
+                    self.pending_counts_by_content.remove(&content_id);
+                    if let Some(status) = self.completed_status_by_content.get(&content_id) {
+                        self.status_by_content.insert(content_id, status.clone());
+                    } else {
+                        self.status_by_content.remove(&content_id);
+                    }
+                }
+            }
             job.status = MigrationStatus::InProgress;
             job.attempt += 1;
             Some(job)
@@ -88,12 +115,24 @@ impl MigrationScheduler {
     /// Mark a job as completed and archive it.
     pub fn complete(&mut self, mut job: MigrationJob) {
         job.status = MigrationStatus::Completed;
+        self.completed_status_by_content
+            .insert(job.content_id.clone(), MigrationStatus::Completed);
+        if !self.pending_counts_by_content.contains_key(&job.content_id) {
+            self.status_by_content
+                .insert(job.content_id.clone(), MigrationStatus::Completed);
+        }
         self.completed_jobs.push(job);
     }
 
     /// Mark a job as failed and archive it.
     pub fn fail(&mut self, mut job: MigrationJob) {
         job.status = MigrationStatus::Failed;
+        self.completed_status_by_content
+            .insert(job.content_id.clone(), MigrationStatus::Failed);
+        if !self.pending_counts_by_content.contains_key(&job.content_id) {
+            self.status_by_content
+                .insert(job.content_id.clone(), MigrationStatus::Failed);
+        }
         self.completed_jobs.push(job);
     }
 
@@ -105,6 +144,12 @@ impl MigrationScheduler {
         }
         let mut retried = job;
         retried.status = MigrationStatus::Pending;
+        *self
+            .pending_counts_by_content
+            .entry(retried.content_id.clone())
+            .or_insert(0) += 1;
+        self.status_by_content
+            .insert(retried.content_id.clone(), MigrationStatus::Pending);
         self.pending_jobs.push_back(retried);
         true
     }
@@ -113,26 +158,7 @@ impl MigrationScheduler {
     ///
     /// Checks pending jobs first, then completed jobs.
     pub fn get_status(&self, content_id: &ContentId) -> Option<&MigrationStatus> {
-        // Check pending queue.
-        if let Some(job) = self
-            .pending_jobs
-            .iter()
-            .find(|j| j.content_id == *content_id)
-        {
-            return Some(&job.status);
-        }
-
-        // Check completed/failed archive.
-        if let Some(job) = self
-            .completed_jobs
-            .iter()
-            .rev()
-            .find(|j| j.content_id == *content_id)
-        {
-            return Some(&job.status);
-        }
-
-        None
+        self.status_by_content.get(content_id)
     }
 
     /// Return the number of pending jobs.
@@ -157,7 +183,10 @@ mod tests {
     use super::*;
 
     fn cid(hash: &str) -> ContentId {
-        ContentId { provider: "ipfs".to_string(), hash: hash.to_string() }
+        ContentId {
+            provider: "ipfs".to_string(),
+            hash: hash.to_string(),
+        }
     }
 
     #[test]
@@ -214,6 +243,52 @@ mod tests {
     fn test_get_status_unknown() {
         let ms = MigrationScheduler::new();
         assert_eq!(ms.get_status(&cid("unknown")), None);
+    }
+
+    #[test]
+    fn test_status_none_while_in_progress_without_history() {
+        let mut ms = MigrationScheduler::new();
+        ms.schedule(cid("a"), DataTier::Hot, DataTier::Warm);
+        let _job = ms.execute_next().unwrap();
+        assert_eq!(ms.get_status(&cid("a")), None);
+    }
+
+    #[test]
+    fn test_status_prefers_pending_over_completed() {
+        let mut ms = MigrationScheduler::new();
+        ms.schedule(cid("a"), DataTier::Hot, DataTier::Warm);
+        let job = ms.execute_next().unwrap();
+        ms.complete(job);
+        assert_eq!(ms.get_status(&cid("a")), Some(&MigrationStatus::Completed));
+
+        ms.schedule(cid("a"), DataTier::Warm, DataTier::Cold);
+        assert_eq!(ms.get_status(&cid("a")), Some(&MigrationStatus::Pending));
+    }
+
+    #[test]
+    fn test_status_restores_completed_after_pending_drained() {
+        let mut ms = MigrationScheduler::new();
+        ms.schedule(cid("a"), DataTier::Hot, DataTier::Warm);
+        let job = ms.execute_next().unwrap();
+        ms.complete(job);
+
+        ms.schedule(cid("a"), DataTier::Warm, DataTier::Cold);
+        assert_eq!(ms.get_status(&cid("a")), Some(&MigrationStatus::Pending));
+        let _in_progress = ms.execute_next().unwrap();
+        assert_eq!(ms.get_status(&cid("a")), Some(&MigrationStatus::Completed));
+    }
+
+    #[test]
+    fn test_pending_count_index_consistency_for_duplicates() {
+        let mut ms = MigrationScheduler::new();
+        ms.schedule(cid("dup"), DataTier::Hot, DataTier::Warm);
+        ms.schedule(cid("dup"), DataTier::Warm, DataTier::Cold);
+
+        let _job = ms.execute_next().unwrap();
+        assert_eq!(ms.get_status(&cid("dup")), Some(&MigrationStatus::Pending));
+
+        let _job = ms.execute_next().unwrap();
+        assert_eq!(ms.get_status(&cid("dup")), None);
     }
 
     #[test]
