@@ -15,3 +15,4 @@ async-trait.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
+wrfcoin-meteo-types.workspace = true
