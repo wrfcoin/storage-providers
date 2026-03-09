@@ -98,7 +98,7 @@ fn ocean_report(id: &str) -> EnvironmentalReport {
         payload: ReportPayload::Ocean(OceanPayload {
             sea_surface_temperature_c: Some(28.0), salinity_psu: Some(35.0),
             wave_height_m: Some(1.5), wave_period_s: Some(8.0),
-            current_speed_ms: Some(0.3), current_direction_deg: Some(180),
+            current_speed_ms: Some(0.3), current_direction_deg: Some(180.0_f64),
             chlorophyll_a_mgl: Some(0.2), dissolved_oxygen_mgl: Some(7.0),
             depth_m: Some(0.5),
         }),
