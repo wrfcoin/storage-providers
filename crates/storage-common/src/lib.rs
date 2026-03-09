@@ -21,8 +21,8 @@ pub use traits::{ContentAddressed, StorageProvider};
 pub use types::{
     AdmissionDecision, AirQualityPayload, ArchiveReceipt, AvailabilitySlaStatus, ContentId,
     DataTier, EnvironmentalDomain, EnvironmentalReport, GeoLocation, HealthStatus,
-    HydrologyPayload, Metadata, OceanPayload, ProvenanceChain, ProvenanceLink,
+    HydrologyPayload, Metadata, OceanPayload, PayloadBoundsValidate, ProvenanceChain, ProvenanceLink,
     ProvenanceValidationResult, PublicInterestAvailabilityPolicy, QuarantineRecord, ReportPayload,
     RetentionPolicy, SoilPayload, StorageReceipt, StorageStats, WaterQualityPayload,
-    WeatherPayload, WildfirePayload,
+    WeatherPayload, WildfirePayload, validate_report_payload,
 };

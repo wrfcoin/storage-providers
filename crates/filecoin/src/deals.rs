@@ -18,6 +18,32 @@ pub enum DealStatus {
     Slashed,
 }
 
+/// Errors returned by DealManager lifecycle methods.
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum DealError {
+    #[error("deal not found: {0}")]
+    NotFound(DealId),
+    #[error("invalid status transition: {from:?} → {to:?}")]
+    InvalidTransition { from: DealStatus, to: DealStatus },
+}
+
+/// Quality tier assigned to a storage deal based on oracle/physics validation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QualityTier {
+    High,
+    Standard,
+    Low,
+    Unverified,
+}
+
+/// Minimum deal duration required to retain data at a given quality tier.
+///
+/// # TODO(#5): enforce retention policy in scheduler
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetentionPolicy {
+    pub min_deal_duration_epochs: u64,
+}
+
 /// Represents a Filecoin storage deal.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageDeal {
@@ -41,6 +67,8 @@ pub struct StorageDeal {
     pub end_epoch: u64,
     /// Current status of the deal.
     pub status: DealStatus,
+    /// Optional quality tier set by the oracle validation pipeline.
+    pub quality_tier: Option<QualityTier>,
 }
 
 /// Manages the lifecycle of Filecoin storage deals.
@@ -52,6 +80,8 @@ pub struct DealManager {
     deals: Vec<StorageDeal>,
     /// Secondary index: deal_id → position in `deals`.
     index: HashMap<DealId, usize>,
+    /// Secondary index: data_cid → list of DealIds for that dataset (across renewals).
+    data_index: HashMap<String, Vec<DealId>>,
     next_deal_id: u64,
 }
 
@@ -61,6 +91,7 @@ impl DealManager {
         Self {
             deals: Vec::new(),
             index: HashMap::new(),
+            data_index: HashMap::new(),
             next_deal_id: 1,
         }
     }
@@ -89,9 +120,11 @@ impl DealManager {
             start_epoch: 0, // Filled in when deal is accepted.
             end_epoch: duration_epochs,
             status: DealStatus::Proposed,
+            quality_tier: None,
         };
 
         let vec_idx = self.deals.len();
+        self.data_index.entry(deal.data_cid.clone()).or_default().push(deal_id.clone());
         self.deals.push(deal);
         self.index.insert(deal_id.clone(), vec_idx);
         deal_id
@@ -112,7 +145,78 @@ impl DealManager {
             self.index.insert(swapped_id, pos);
         }
 
+        // Remove from data_index.
+        let data_cid = removed.data_cid.clone();
+        if let Some(ids) = self.data_index.get_mut(&data_cid) {
+            ids.retain(|id| id != deal_id);
+            if ids.is_empty() {
+                self.data_index.remove(&data_cid);
+            }
+        }
+
         Some(removed)
+    }
+
+    /// Returns all deal IDs associated with a given data CID (renewal history).
+    pub fn get_deals_by_data_cid(&self, data_cid: &str) -> &[DealId] {
+        self.data_index.get(data_cid).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
+    /// Transition a deal from Proposed to Active, recording the current epoch.
+    ///
+    /// Returns `DealError::NotFound` if the deal doesn't exist.
+    /// Returns `DealError::InvalidTransition` if the deal is not in `Proposed` state.
+    pub fn activate_deal(&mut self, deal_id: &DealId, current_epoch: u64) -> Result<(), DealError> {
+        let &pos = self.index.get(deal_id.as_str())
+            .ok_or_else(|| DealError::NotFound(deal_id.clone()))?;
+        let deal = &mut self.deals[pos];
+        if deal.status != DealStatus::Proposed {
+            return Err(DealError::InvalidTransition {
+                from: deal.status.clone(),
+                to: DealStatus::Active,
+            });
+        }
+        deal.status = DealStatus::Active;
+        deal.start_epoch = current_epoch;
+        Ok(())
+    }
+
+    /// Transition a deal from Active to Expired and remove it from the manager.
+    ///
+    /// Returns `DealError::NotFound` if the deal doesn't exist.
+    /// Returns `DealError::InvalidTransition` if the deal is not `Active`.
+    pub fn expire_deal(&mut self, deal_id: &DealId) -> Result<(), DealError> {
+        {
+            let &pos = self.index.get(deal_id.as_str())
+                .ok_or_else(|| DealError::NotFound(deal_id.clone()))?;
+            if self.deals[pos].status != DealStatus::Active {
+                return Err(DealError::InvalidTransition {
+                    from: self.deals[pos].status.clone(),
+                    to: DealStatus::Expired,
+                });
+            }
+        }
+        self.remove_deal(deal_id);
+        Ok(())
+    }
+
+    /// Transition a deal from Active to Slashed and remove it from the manager.
+    ///
+    /// Returns `DealError::NotFound` if the deal doesn't exist.
+    /// Returns `DealError::InvalidTransition` if the deal is not `Active`.
+    pub fn slash_deal(&mut self, deal_id: &DealId) -> Result<(), DealError> {
+        {
+            let &pos = self.index.get(deal_id.as_str())
+                .ok_or_else(|| DealError::NotFound(deal_id.clone()))?;
+            if self.deals[pos].status != DealStatus::Active {
+                return Err(DealError::InvalidTransition {
+                    from: self.deals[pos].status.clone(),
+                    to: DealStatus::Slashed,
+                });
+            }
+        }
+        self.remove_deal(deal_id);
+        Ok(())
     }
 
     /// Look up a deal by ID in O(1).
@@ -322,5 +426,69 @@ mod tests {
         let still_orig = dm.get_deal(&id).unwrap();
         assert_eq!(still_orig.status, orig.status);
         assert_eq!(still_orig.end_epoch, orig.end_epoch);
+    }
+
+    // ── New tests: data_cid index + lifecycle transitions ────────────────────
+
+    /// Two deals with the same data_cid — both appear in data_index after renewal.
+    #[test]
+    fn data_cid_index_tracks_renewals() {
+        let mut dm = DealManager::new();
+        let id1 = dm.propose_deal("m".into(), "c".into(), "QmX".into(), 100, 10, 500);
+        let id2 = dm.renew_deal(&id1).unwrap();
+        let ids = dm.get_deals_by_data_cid("QmX");
+        assert!(ids.contains(&id1));
+        assert!(ids.contains(&id2));
+        assert_eq!(ids.len(), 2);
+    }
+
+    /// activate_deal sets start_epoch to the provided current_epoch.
+    #[test]
+    fn activate_sets_start_epoch() {
+        let mut dm = DealManager::new();
+        let id = dm.propose_deal("m".into(), "c".into(), "d".into(), 100, 10, 500);
+        dm.activate_deal(&id, 42).unwrap();
+        let deal = dm.get_deal(&id).unwrap();
+        assert_eq!(deal.start_epoch, 42);
+        assert_eq!(deal.status, DealStatus::Active);
+    }
+
+    /// Full happy path: Proposed → Active → Expired (removed on terminal state).
+    #[test]
+    fn lifecycle_proposed_to_active_to_expired() {
+        let mut dm = DealManager::new();
+        let id = dm.propose_deal("m".into(), "c".into(), "d".into(), 100, 10, 500);
+        dm.activate_deal(&id, 100).unwrap();
+        dm.expire_deal(&id).unwrap();
+        // Deal is removed on expiry.
+        assert!(dm.get_deal(&id).is_none());
+        assert_eq!(dm.list_deals().len(), 0);
+    }
+
+    /// Cannot expire a Proposed deal (must be Active first).
+    #[test]
+    fn invalid_transition_rejected() {
+        let mut dm = DealManager::new();
+        let id = dm.propose_deal("m".into(), "c".into(), "d".into(), 100, 10, 500);
+        let err = dm.expire_deal(&id).unwrap_err();
+        assert!(matches!(
+            err,
+            DealError::InvalidTransition { from: DealStatus::Proposed, to: DealStatus::Expired }
+        ));
+    }
+
+    /// After expiry or slashing, deal is no longer findable by deal_id.
+    #[test]
+    fn removal_on_terminal_state() {
+        let mut dm = DealManager::new();
+        let id1 = dm.propose_deal("m".into(), "c".into(), "d1".into(), 100, 10, 500);
+        let id2 = dm.propose_deal("m".into(), "c".into(), "d2".into(), 100, 10, 500);
+        dm.activate_deal(&id1, 1).unwrap();
+        dm.activate_deal(&id2, 1).unwrap();
+        dm.expire_deal(&id1).unwrap();
+        dm.slash_deal(&id2).unwrap();
+        assert!(dm.get_deal(&id1).is_none(), "expired deal must be removed");
+        assert!(dm.get_deal(&id2).is_none(), "slashed deal must be removed");
+        assert_eq!(dm.list_deals().len(), 0);
     }
 }

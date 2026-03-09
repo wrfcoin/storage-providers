@@ -31,7 +31,7 @@ impl DomainContentIndex {
     pub fn insert(&mut self, entry: IndexEntry) {
         let key = entry.content_id.to_string();
         self.by_domain
-            .entry(entry.domain.clone())
+            .entry(entry.domain)
             .or_default()
             .push(entry.clone());
         self.by_content_id.insert(key, entry);
