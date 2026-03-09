@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use wrfcoin_storage_common::{
     AdmissionDecision, AvailabilitySlaStatus, ContentId, DataTier, EnvironmentalReport, Metadata,
     ProvenanceChain, ProvenanceValidationResult, PublicInterestAvailabilityPolicy, QuarantineRecord,
-    StorageError, StorageProvider, StorageStats,
+    StorageError, StorageProvider, StorageStats, validate_report_payload,
 };
 use wrfcoin_storage_common::domain_index::{DomainContentIndex, IndexEntry};
 use wrfcoin_storage_common::EnvironmentalDomain;
@@ -302,28 +302,37 @@ impl DataTieringOrchestrator {
         }
     }
 
-    /// Store a validated `EnvironmentalReport` with provenance enforcement.
+    /// Store a validated `EnvironmentalReport` with provenance presence check.
     ///
     /// Steps:
-    /// 1. `report.validate()` — structural report validation.
-    /// 2. Require `report.provenance` to be `Some`.
-    /// 3. Serialize and store with `store_with_provenance_enforcement`.
+    /// 1. `report.validate()` — structural report validation (IDs, domain/payload match).
+    /// 2. `validate_report_payload` — Soil/Ocean/Hydrology physical-range bounds.
+    /// 3. Provenance presence check against active policy (simple chain).
+    /// 4. Serialize and store in the requested tier.
+    /// 5. Index the entry by domain.
     pub async fn store_environmental_report(
         &self,
         report: &EnvironmentalReport,
         tier: DataTier,
     ) -> Result<AdmissionDecision, StorageError> {
-        // Validate report structure.
+        // 1. Structural validation.
         if let Err(reason) = report.validate() {
             return Err(StorageError::InvalidData(reason));
         }
-
-        let provenance = report.provenance.as_ref();
-
-        // Serialize the report to bytes.
+        // 2. Payload physical-range bounds.
+        if let Err(reason) = validate_report_payload(&report.payload) {
+            return Err(StorageError::InvalidData(reason));
+        }
+        // 3. Provenance presence check.
+        let require = self.provenance_policy.read()
+            .map_err(|e| StorageError::Internal(format!("lock poisoned: {e}")))?
+            .require_provenance;
+        if require && report.provenance.is_none() {
+            return Ok(AdmissionDecision::Rejected);
+        }
+        // 4. Serialize + store.
         let bytes = serde_json::to_vec(report)
             .map_err(|e| StorageError::InvalidData(format!("report serialization failed: {e}")))?;
-
         let metadata = Metadata {
             content_type: "application/json".to_string(),
             size: bytes.len() as u64,
@@ -336,26 +345,21 @@ impl DataTieringOrchestrator {
                 t
             },
         };
-
-        let decision = self.store_with_provenance_enforcement(&bytes, &metadata, &tier, provenance)
-            .await?;
-
-        if decision == AdmissionDecision::Accepted {
-            if let Ok(mut idx) = self.domain_index.write() {
-                idx.insert(IndexEntry {
-                    content_id: ContentId {
-                        provider: format!("{tier:?}"),
-                        hash: report.report_id.clone(),
-                    },
-                    domain: report.domain.clone(),
-                    station_id: report.station_id.clone(),
-                    report_id: report.report_id.clone(),
-                    stored_at: report.submitted_at,
-                });
-            }
+        self.store_with_tier(&tier, &bytes, &metadata).await?;
+        // 5. Index entry.
+        if let Ok(mut idx) = self.domain_index.write() {
+            idx.insert(IndexEntry {
+                content_id: ContentId {
+                    provider: format!("{tier:?}"),
+                    hash: report.report_id.clone(),
+                },
+                domain: report.domain,
+                station_id: report.station_id.clone(),
+                report_id: report.report_id.clone(),
+                stored_at: report.submitted_at,
+            });
         }
-
-        Ok(decision)
+        Ok(AdmissionDecision::Accepted)
     }
 
     /// Query the domain content index for a given environmental domain.
@@ -909,9 +913,9 @@ mod tests {
 
     fn sample_env_report_with_provenance() -> wrfcoin_storage_common::EnvironmentalReport {
         use wrfcoin_storage_common::{
-            EnvironmentalDomain, EnvironmentalReport, GeoLocation, ProvenanceChain, ReportPayload,
-            WeatherPayload,
+            EnvironmentalDomain, EnvironmentalReport, GeoLocation, ReportPayload, WeatherPayload,
         };
+        use wrfcoin_meteo_types::{ProvenanceChain as MeteoChain, ProvenanceEntry};
 
         EnvironmentalReport {
             report_id: "env-001".to_string(),
@@ -922,28 +926,18 @@ mod tests {
             submitted_at: 9_000_001,
             payload: ReportPayload::Weather(WeatherPayload {
                 temperature_c: Some(18.0),
-                humidity_pct: Some(70.0),
+                humidity_percent: Some(70.0),
                 pressure_hpa: None,
                 wind_speed_ms: None,
                 wind_direction_deg: None,
                 precipitation_mm: None,
+                dewpoint_c: None,
                 visibility_m: None,
             }),
             quality_score: Some(0.9),
-            provenance: Some(ProvenanceChain {
-                chain_id: "chain-env".to_string(),
-                root_hash: "root".to_string(),
-                links: vec![
-                    wrfcoin_storage_common::ProvenanceLink {
-                        artifact_hash: "root".to_string(),
-                        parent_hash: None,
-                        signer: "signer-1".to_string(),
-                        signature: "sig-1".to_string(),
-                        algorithm: "ed25519".to_string(),
-                        signed_at: 10,
-                    },
-                ],
-            }),
+            provenance: Some(MeteoChain::new(vec![
+                ProvenanceEntry { attester_id: "signer-1".into(), timestamp: 10 },
+            ])),
         }
     }
 

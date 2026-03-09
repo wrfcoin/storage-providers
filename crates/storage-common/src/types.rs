@@ -2,6 +2,20 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 
+use wrfcoin_meteo_types as mt;
+
+// Re-export canonical environmental types from meteo-types.
+pub use mt::{EnvironmentalDomain, EnvironmentalReport, GeoLocation, ReportPayload};
+
+// Type aliases — keep existing names for all callers in this workspace.
+pub type WeatherPayload = mt::WeatherObservation;
+pub type AirQualityPayload = mt::AirQualityPayload;
+pub type WaterQualityPayload = mt::WaterQualityPayload;
+pub type WildfirePayload = mt::WildfirePayload;
+pub type SoilPayload = mt::SoilPayload;
+pub type OceanPayload = mt::OceanPayload;
+pub type HydrologyPayload = mt::HydrologyPayload;
+
 /// Represents a content identifier across storage providers.
 /// Maps to a CID (IPFS), transaction ID (Arweave), or deal ID (Filecoin).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -156,92 +170,17 @@ pub struct AvailabilitySlaStatus {
     pub sla_met: bool,
 }
 
-/// Environmental report domain classification.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum EnvironmentalDomain {
-    Weather,
-    AirQuality,
-    WaterQuality,
-    Wildfire,
-    Soil,
-    Ocean,
-    Hydrology,
+/// Physical-range bounds validation for domain-specific payloads.
+///
+/// Implemented by storage-providers for the Soil, Ocean, and Hydrology payload
+/// types from meteo-types.  Use [`validate_report_payload`] to dispatch by
+/// variant.
+pub trait PayloadBoundsValidate {
+    fn validate_bounds(&self) -> Result<(), String>;
 }
 
-/// Geographic location with optional altitude.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GeoLocation {
-    pub latitude: f64,
-    pub longitude: f64,
-    pub altitude_m: Option<f64>,
-}
-
-/// Weather observation payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WeatherPayload {
-    pub temperature_c: Option<f64>,
-    pub humidity_pct: Option<f64>,
-    pub pressure_hpa: Option<f64>,
-    pub wind_speed_ms: Option<f64>,
-    pub wind_direction_deg: Option<u16>,
-    pub precipitation_mm: Option<f64>,
-    pub visibility_m: Option<f64>,
-}
-
-/// Air quality observation payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AirQualityPayload {
-    pub aqi: Option<u16>,
-    pub pm25_ugm3: Option<f64>,
-    pub pm10_ugm3: Option<f64>,
-    pub o3_ppb: Option<f64>,
-    pub no2_ppb: Option<f64>,
-    pub so2_ppb: Option<f64>,
-    pub co_ppm: Option<f64>,
-}
-
-/// Water quality observation payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WaterQualityPayload {
-    pub ph: Option<f64>,
-    pub dissolved_oxygen_mgl: Option<f64>,
-    pub turbidity_ntu: Option<f64>,
-    pub conductivity_usm: Option<f64>,
-    pub temperature_c: Option<f64>,
-    pub total_dissolved_solids_mgl: Option<f64>,
-}
-
-/// Wildfire detection and status payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WildfirePayload {
-    pub fire_radiative_power_mw: Option<f64>,
-    pub burn_area_km2: Option<f64>,
-    pub confidence_pct: Option<f64>,
-    pub smoke_aod: Option<f64>,
-    pub containment_pct: Option<f64>,
-    pub active: bool,
-}
-
-/// Soil observation payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SoilPayload {
-    pub moisture_pct: Option<f64>,
-    pub temperature_c: Option<f64>,
-    pub ph: Option<f64>,
-    pub organic_carbon_pct: Option<f64>,
-    pub nitrogen_mgl: Option<f64>,
-    pub phosphorus_mgl: Option<f64>,
-    pub potassium_mgl: Option<f64>,
-    pub conductivity_dsm: Option<f64>,
-    pub depth_cm: Option<f64>,
-}
-
-impl SoilPayload {
-    /// Validate physical bounds of soil observation fields.
-    ///
-    /// Skips any field that is `None`. Returns an error describing the first
-    /// out-of-range field encountered.
-    pub fn validate(&self) -> Result<(), String> {
+impl PayloadBoundsValidate for SoilPayload {
+    fn validate_bounds(&self) -> Result<(), String> {
         if let Some(v) = self.moisture_pct {
             if !(0.0..=100.0).contains(&v) {
                 return Err(format!("moisture_pct {v} is out of range [0.0, 100.0]"));
@@ -286,33 +225,15 @@ impl SoilPayload {
     }
 }
 
-/// Ocean observation payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OceanPayload {
-    pub sea_surface_temperature_c: Option<f64>,
-    pub salinity_psu: Option<f64>,
-    pub wave_height_m: Option<f64>,
-    pub wave_period_s: Option<f64>,
-    pub current_speed_ms: Option<f64>,
-    pub current_direction_deg: Option<u16>,
-    pub chlorophyll_a_mgl: Option<f64>,
-    pub dissolved_oxygen_mgl: Option<f64>,
-    pub depth_m: Option<f64>,
-}
-
-impl OceanPayload {
-    /// Validate physical bounds of ocean observation fields.
-    ///
-    /// Skips any field that is `None`. Returns an error describing the first
-    /// out-of-range field encountered.
-    pub fn validate(&self) -> Result<(), String> {
+impl PayloadBoundsValidate for OceanPayload {
+    fn validate_bounds(&self) -> Result<(), String> {
         if let Some(v) = self.salinity_psu {
             if !(0.0..=50.0).contains(&v) {
                 return Err(format!("salinity_psu {v} is out of range [0.0, 50.0]"));
             }
         }
         if let Some(v) = self.current_direction_deg {
-            if v > 360 {
+            if v > 360.0 {
                 return Err(format!("current_direction_deg {v} is out of range [0, 360]"));
             }
         }
@@ -350,25 +271,8 @@ impl OceanPayload {
     }
 }
 
-/// Hydrology observation payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HydrologyPayload {
-    pub river_discharge_m3s: Option<f64>,
-    pub water_level_m: Option<f64>,
-    pub flow_velocity_ms: Option<f64>,
-    pub sediment_load_mgl: Option<f64>,
-    pub groundwater_level_m: Option<f64>,
-    pub reservoir_storage_pct: Option<f64>,
-    pub flood_risk_level: Option<u8>,
-    pub drought_index: Option<f64>,
-}
-
-impl HydrologyPayload {
-    /// Validate physical bounds of hydrology observation fields.
-    ///
-    /// Skips any field that is `None`. Returns an error describing the first
-    /// out-of-range field encountered.
-    pub fn validate(&self) -> Result<(), String> {
+impl PayloadBoundsValidate for HydrologyPayload {
+    fn validate_bounds(&self) -> Result<(), String> {
         if let Some(v) = self.reservoir_storage_pct {
             if !(0.0..=100.0).contains(&v) {
                 return Err(format!(
@@ -400,90 +304,15 @@ impl HydrologyPayload {
     }
 }
 
-/// Domain-specific payload variants for environmental reports.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ReportPayload {
-    Weather(WeatherPayload),
-    AirQuality(AirQualityPayload),
-    WaterQuality(WaterQualityPayload),
-    Wildfire(WildfirePayload),
-    Soil(SoilPayload),
-    Ocean(OceanPayload),
-    Hydrology(HydrologyPayload),
-}
-
-impl ReportPayload {
-    /// Return the domain that corresponds to this payload variant.
-    pub fn domain(&self) -> EnvironmentalDomain {
-        match self {
-            ReportPayload::Weather(_) => EnvironmentalDomain::Weather,
-            ReportPayload::AirQuality(_) => EnvironmentalDomain::AirQuality,
-            ReportPayload::WaterQuality(_) => EnvironmentalDomain::WaterQuality,
-            ReportPayload::Wildfire(_) => EnvironmentalDomain::Wildfire,
-            ReportPayload::Soil(_) => EnvironmentalDomain::Soil,
-            ReportPayload::Ocean(_) => EnvironmentalDomain::Ocean,
-            ReportPayload::Hydrology(_) => EnvironmentalDomain::Hydrology,
-        }
-    }
-}
-
-/// Canonical environmental report payload covering multiple observation domains.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EnvironmentalReport {
-    /// Unique identifier for this report.
-    pub report_id: String,
-    /// Domain classification (must match `payload` variant).
-    pub domain: EnvironmentalDomain,
-    /// Identifier of the originating station or sensor.
-    pub station_id: String,
-    /// Geographic location of the observation.
-    pub location: GeoLocation,
-    /// Unix timestamp when the observation was made.
-    pub observed_at: u64,
-    /// Unix timestamp when the report was submitted.
-    pub submitted_at: u64,
-    /// Domain-specific measurement payload.
-    pub payload: ReportPayload,
-    /// Optional data quality score in the range [0.0, 1.0].
-    pub quality_score: Option<f64>,
-    /// Optional provenance chain for attestation.
-    pub provenance: Option<ProvenanceChain>,
-}
-
-impl EnvironmentalReport {
-    /// Validate report consistency.
-    ///
-    /// Checks that required string fields are non-empty and that `domain`
-    /// matches the `payload` variant.
-    pub fn validate(&self) -> Result<(), String> {
-        if self.report_id.is_empty() {
-            return Err("empty report_id".into());
-        }
-        if self.station_id.is_empty() {
-            return Err("empty station_id".into());
-        }
-        if self.domain != self.payload.domain() {
-            return Err(format!(
-                "domain {:?} does not match payload variant {:?}",
-                self.domain,
-                self.payload.domain()
-            ));
-        }
-        if let Some(score) = self.quality_score {
-            if !(0.0..=1.0).contains(&score) {
-                return Err(format!(
-                    "quality_score {score} is out of range [0.0, 1.0]"
-                ));
-            }
-        }
-        // Validate domain-specific payload bounds.
-        match &self.payload {
-            ReportPayload::Soil(p) => p.validate()?,
-            ReportPayload::Ocean(p) => p.validate()?,
-            ReportPayload::Hydrology(p) => p.validate()?,
-            _ => {} // Other domains: no bounds validation yet
-        }
-        Ok(())
+/// Validate physical-range bounds for Soil, Ocean, and Hydrology payloads.
+///
+/// Returns `Ok(())` for all other payload domains (no bounds defined yet).
+pub fn validate_report_payload(payload: &ReportPayload) -> Result<(), String> {
+    match payload {
+        ReportPayload::Soil(p) => p.validate_bounds(),
+        ReportPayload::Ocean(p) => p.validate_bounds(),
+        ReportPayload::Hydrology(p) => p.validate_bounds(),
+        _ => Ok(()),
     }
 }
 
@@ -675,11 +504,12 @@ mod tests {
             submitted_at: 1_000_001,
             payload: ReportPayload::Weather(WeatherPayload {
                 temperature_c: Some(21.5),
-                humidity_pct: Some(65.0),
+                humidity_percent: Some(65.0),
                 pressure_hpa: Some(1013.25),
                 wind_speed_ms: Some(3.2),
-                wind_direction_deg: Some(270),
+                wind_direction_deg: Some(270.0),
                 precipitation_mm: None,
+                dewpoint_c: None,
                 visibility_m: Some(10_000.0),
             }),
             quality_score: Some(0.95),
@@ -812,7 +642,7 @@ mod tests {
                 confidence_pct: Some(90.0),
                 smoke_aod: Some(0.45),
                 containment_pct: Some(30.0),
-                active: true,
+                active: Some(true),
             }),
             quality_score: Some(1.0),
             provenance: None,
@@ -832,11 +662,12 @@ mod tests {
             // Wildfire domain but Weather payload — should fail validation
             payload: ReportPayload::Weather(WeatherPayload {
                 temperature_c: Some(30.0),
-                humidity_pct: None,
+                humidity_percent: None,
                 pressure_hpa: None,
                 wind_speed_ms: None,
                 wind_direction_deg: None,
                 precipitation_mm: None,
+                dewpoint_c: None,
                 visibility_m: None,
             }),
             quality_score: None,
@@ -927,7 +758,7 @@ mod tests {
                 wave_height_m: Some(1.8),
                 wave_period_s: Some(9.5),
                 current_speed_ms: Some(0.4),
-                current_direction_deg: Some(180),
+                current_direction_deg: Some(180.0_f64),
                 chlorophyll_a_mgl: Some(0.25),
                 dissolved_oxygen_mgl: Some(7.1),
                 depth_m: Some(0.5),
@@ -945,7 +776,7 @@ mod tests {
         if let ReportPayload::Ocean(ref p) = report.payload {
             assert_eq!(p.sea_surface_temperature_c, Some(28.3));
             assert_eq!(p.salinity_psu, Some(35.2));
-            assert_eq!(p.current_direction_deg, Some(180));
+            assert_eq!(p.current_direction_deg, Some(180.0_f64));
         } else {
             panic!("expected Ocean payload variant");
         }
@@ -1041,7 +872,7 @@ mod tests {
         assert!(err.contains("domain"));
     }
 
-    // ---- SoilPayload::validate() tests ----
+    // ---- SoilPayload::validate_bounds() tests ----
 
     #[test]
     fn test_soil_payload_validate_valid() {
@@ -1056,7 +887,7 @@ mod tests {
             conductivity_dsm: Some(0.45),
             depth_cm: Some(10.0),
         };
-        assert!(p.validate().is_ok());
+        assert!(p.validate_bounds().is_ok());
     }
 
     #[test]
@@ -1072,7 +903,7 @@ mod tests {
             conductivity_dsm: None,
             depth_cm: None,
         };
-        assert!(p.validate().is_ok());
+        assert!(p.validate_bounds().is_ok());
     }
 
     #[test]
@@ -1088,7 +919,7 @@ mod tests {
             conductivity_dsm: None,
             depth_cm: None,
         };
-        let err = p.validate().unwrap_err();
+        let err = p.validate_bounds().unwrap_err();
         assert!(err.contains("ph"), "expected error to mention 'ph', got: {err}");
     }
 
@@ -1105,7 +936,7 @@ mod tests {
             conductivity_dsm: None,
             depth_cm: None,
         };
-        let err = p.validate().unwrap_err();
+        let err = p.validate_bounds().unwrap_err();
         assert!(err.contains("moisture"), "expected error to mention 'moisture', got: {err}");
     }
 
@@ -1122,7 +953,7 @@ mod tests {
             conductivity_dsm: None,
             depth_cm: Some(-5.0),
         };
-        let err = p.validate().unwrap_err();
+        let err = p.validate_bounds().unwrap_err();
         assert!(err.contains("depth"), "expected error to mention 'depth', got: {err}");
     }
 
@@ -1136,12 +967,12 @@ mod tests {
             wave_height_m: Some(1.8),
             wave_period_s: Some(9.5),
             current_speed_ms: Some(0.4),
-            current_direction_deg: Some(180),
+            current_direction_deg: Some(180.0_f64),
             chlorophyll_a_mgl: Some(0.25),
             dissolved_oxygen_mgl: Some(7.1),
             depth_m: Some(0.5),
         };
-        assert!(p.validate().is_ok());
+        assert!(p.validate_bounds().is_ok());
     }
 
     #[test]
@@ -1157,7 +988,7 @@ mod tests {
             dissolved_oxygen_mgl: None,
             depth_m: None,
         };
-        assert!(p.validate().is_ok());
+        assert!(p.validate_bounds().is_ok());
     }
 
     #[test]
@@ -1173,7 +1004,7 @@ mod tests {
             dissolved_oxygen_mgl: None,
             depth_m: None,
         };
-        let err = p.validate().unwrap_err();
+        let err = p.validate_bounds().unwrap_err();
         assert!(err.contains("salinity"), "expected error to mention 'salinity', got: {err}");
     }
 
@@ -1190,7 +1021,7 @@ mod tests {
             dissolved_oxygen_mgl: None,
             depth_m: None,
         };
-        let err = p.validate().unwrap_err();
+        let err = p.validate_bounds().unwrap_err();
         assert!(err.contains("wave_height"), "expected error to mention 'wave_height', got: {err}");
     }
 
@@ -1202,16 +1033,16 @@ mod tests {
             wave_height_m: None,
             wave_period_s: None,
             current_speed_ms: None,
-            current_direction_deg: Some(361),
+            current_direction_deg: Some(361.0_f64),
             chlorophyll_a_mgl: None,
             dissolved_oxygen_mgl: None,
             depth_m: None,
         };
-        let err = p.validate().unwrap_err();
+        let err = p.validate_bounds().unwrap_err();
         assert!(err.contains("current_direction"), "expected error to mention 'current_direction', got: {err}");
     }
 
-    // ---- HydrologyPayload::validate() tests ----
+    // ---- HydrologyPayload::validate_bounds() tests ----
 
     #[test]
     fn test_hydrology_payload_validate_valid() {
@@ -1225,7 +1056,7 @@ mod tests {
             flood_risk_level: Some(2),
             drought_index: Some(-0.5),
         };
-        assert!(p.validate().is_ok());
+        assert!(p.validate_bounds().is_ok());
     }
 
     #[test]
@@ -1240,7 +1071,7 @@ mod tests {
             flood_risk_level: None,
             drought_index: None,
         };
-        assert!(p.validate().is_ok());
+        assert!(p.validate_bounds().is_ok());
     }
 
     #[test]
@@ -1255,7 +1086,7 @@ mod tests {
             flood_risk_level: None,
             drought_index: None,
         };
-        let err = p.validate().unwrap_err();
+        let err = p.validate_bounds().unwrap_err();
         assert!(err.contains("reservoir_storage"), "expected error to mention 'reservoir_storage', got: {err}");
     }
 
@@ -1271,7 +1102,7 @@ mod tests {
             flood_risk_level: Some(6),
             drought_index: None,
         };
-        let err = p.validate().unwrap_err();
+        let err = p.validate_bounds().unwrap_err();
         assert!(err.contains("flood_risk"), "expected error to mention 'flood_risk', got: {err}");
     }
 
@@ -1287,11 +1118,11 @@ mod tests {
             flood_risk_level: None,
             drought_index: None,
         };
-        let err = p.validate().unwrap_err();
+        let err = p.validate_bounds().unwrap_err();
         assert!(err.contains("river_discharge"), "expected error to mention 'river_discharge', got: {err}");
     }
 
-    // ---- EnvironmentalReport::validate() payload wiring tests ----
+    // ---- validate_report_payload() payload bounds tests ----
 
     #[test]
     fn test_report_validate_rejects_invalid_soil_payload() {
@@ -1299,7 +1130,7 @@ mod tests {
         if let ReportPayload::Soil(ref mut p) = report.payload {
             p.ph = Some(20.0);
         }
-        let err = report.validate().unwrap_err();
+        let err = validate_report_payload(&report.payload).unwrap_err();
         assert!(err.contains("ph"));
     }
 
@@ -1309,7 +1140,7 @@ mod tests {
         if let ReportPayload::Ocean(ref mut p) = report.payload {
             p.salinity_psu = Some(-5.0);
         }
-        let err = report.validate().unwrap_err();
+        let err = validate_report_payload(&report.payload).unwrap_err();
         assert!(err.contains("salinity"));
     }
 
@@ -1319,7 +1150,7 @@ mod tests {
         if let ReportPayload::Hydrology(ref mut p) = report.payload {
             p.reservoir_storage_pct = Some(200.0);
         }
-        let err = report.validate().unwrap_err();
+        let err = validate_report_payload(&report.payload).unwrap_err();
         assert!(err.contains("reservoir_storage"));
     }
 }
