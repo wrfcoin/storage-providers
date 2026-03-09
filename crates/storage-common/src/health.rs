@@ -52,7 +52,7 @@ impl HealthAggregator {
 
         for (name, provider) in &self.providers {
             let result = provider.health_check().await;
-            let is_healthy = result.as_ref().map_or(false, |h| h.healthy);
+            let is_healthy = result.as_ref().is_ok_and(|h| h.healthy);
             if is_healthy {
                 healthy_count += 1;
             }
