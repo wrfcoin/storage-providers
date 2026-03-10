@@ -1,40 +1,69 @@
 # WRFCoin Storage Providers
 
-Decentralized storage integrations for WRFCoin weather data. IPFS, Filecoin, and Arweave providers
-with a hot/warm/cold data tiering orchestrator.
+[![Rust 1.70+](https://img.shields.io/badge/Rust-1.70%2B-000000?logo=rust)](https://www.rust-lang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-Related: [issue #371](https://github.com/wrfcoin/core4/issues/371)
+**Decentralized Storage Ecosystem** for the WRFCoin platform. This repository provides high-performance Rust integrations for IPFS, Filecoin, and Arweave, managed by a sophisticated hot/warm/cold data tiering orchestrator.
 
-## Structure
+## 🏗 Architecture
 
-```
-crates/
-├── storage-common/   # Shared StorageProvider trait, types, errors
-├── ipfs/             # IPFS provider (weather data blobs, CID references)
-├── filecoin/         # Filecoin provider (archival with storage deals)
-├── arweave/          # Arweave provider (permanent climate records)
-└── data-tiering/     # Hot/warm/cold orchestrator with migration
-```
+The storage ecosystem is designed as a modular Rust workspace, ensuring type-safe and performant data handling across multiple decentralized protocols.
 
-## Data Tiering Model
+### Core Modules (`crates/`)
 
-| Tier | Provider | Access Time | Use Case |
-|------|----------|-------------|----------|
-| Hot | Local/Redis | Sub-second | Recent weather observations |
-| Warm | IPFS | Seconds | Active weather data, CID-referenced |
-| Cold | Filecoin | Minutes | Historical datasets with storage deals |
-| Archive | Arweave | Minutes | Permanent climate records |
+- **`storage-common`**: The foundation of the workspace. Defines the core `StorageProvider` and `ContentAddressed` traits, shared types (EnvironmentalReport, Metadata), error handling, and cryptographic integrity verification.
+- **`ipfs`**: Hot/Warm storage provider. Handles rapid ingestion and retrieval of weather data blobs using Content Identifiers (CIDs).
+- **`filecoin`**: Cold storage provider. Manages long-term archival of historical datasets through automated storage deal negotiation.
+- **`arweave`**: Permanent storage provider. Ensures climate records and critical environmental evidence are stored forever on a permaweb layer.
+- **`data-tiering`**: The orchestrator. Implements intelligent migration of data between tiers based on age, frequency of access, and provenance policies.
 
-## Resilience Extensions
+## 📡 Data Tiering Model
 
-- Provenance-chain enforcement is validated before acceptance (`storage-providers#9`).
-- Invalid or synthetic-suspicious artifacts are routed into quarantine metadata flow (`storage-providers#7`).
-- Public-interest classes can be replicated with explicit minimum replica SLA tracking (`storage-providers#10`).
+| Tier | Provider | Access Latency | Primary Use Case |
+|------|----------|----------------|------------------|
+| **Hot** | Local Cache / Redis | < 100ms | Real-time weather observations |
+| **Warm** | IPFS | < 5s | Active datasets and peer-to-peer sharing |
+| **Cold** | Filecoin | Minutes | Historical archival and bulk data backup |
+| **Archive** | Arweave | Minutes | Permanent, immutable climate benchmarks |
 
-## Development
+## 🛡 Advanced Features
 
+- **Provenance Chain Enforcement**: Every stored artifact is validated against a cryptographic provenance chain before being accepted into the archive.
+- **Circuit Breaker & Failover**: The `FailoverRouter` in `storage-common` provides resilience against individual provider outages with automatic fallback logic.
+- **Quarantine Flow**: Suspicious or malformed payloads (identified via `IntegrityVerifier`) are automatically routed to a quarantine metadata flow for manual or AI-assisted audit.
+- **SLA Tracking**: Monitors availability and replication counts for "Public Interest" data classes to ensure minimum replica counts are maintained across the network.
+
+## 🛠 Getting Started
+
+### Prerequisites
+- **Rust**: 1.70+ (Stable)
+- **IPFS Node**: Required for local testing of the IPFS provider.
+- **Arweave/Filecoin API Keys**: Required for integration testing.
+
+### Installation
 ```bash
-cargo check
-cargo test
+git clone https://github.com/wrfcoin/storage-providers.git
+cd storage-providers
 cargo build
 ```
+
+### Development & Testing
+```bash
+# Check all crates in the workspace
+cargo check --workspace
+
+# Run tests for specific provider
+cargo test -p wrfcoin-ipfs
+
+# Run all storage integrity tests
+cargo test --workspace
+```
+
+## 🤝 Integration
+
+This repository depends on `meteo-types` for standardized environmental data structures. It is used by the `backend` services and the `native-chain` for off-chain data availability.
+
+---
+
+Built with ❤️ for the global weather community.  
+Part of the WRFCoin platform.
