@@ -75,7 +75,7 @@ impl StorageProvider for FilecoinStorageProvider {
             data.len() as u64,
             self.config.max_price_per_gib,
             self.config.deal_duration_epochs,
-        );
+        ).map_err(|e| StorageError::ProviderError(format!("deal proposal rejected: {e}")))?;
 
         // Store deal info for retrieval.
         let deal_clone = inner
