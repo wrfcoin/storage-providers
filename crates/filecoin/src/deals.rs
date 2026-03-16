@@ -25,6 +25,10 @@ pub enum DealError {
     NotFound(DealId),
     #[error("invalid status transition: {from:?} → {to:?}")]
     InvalidTransition { from: DealStatus, to: DealStatus },
+    #[error(
+        "deal duration {actual_epochs} epochs is below the minimum required {min_epochs} epochs"
+    )]
+    RetentionPolicyViolation { min_epochs: u64, actual_epochs: u64 },
 }
 
 /// Quality tier assigned to a storage deal based on oracle/physics validation.
@@ -37,8 +41,6 @@ pub enum QualityTier {
 }
 
 /// Minimum deal duration required to retain data at a given quality tier.
-///
-/// # TODO(#5): enforce retention policy in scheduler
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetentionPolicy {
     pub min_deal_duration_epochs: u64,
@@ -83,6 +85,8 @@ pub struct DealManager {
     /// Secondary index: data_cid → list of DealIds for that dataset (across renewals).
     data_index: HashMap<String, Vec<DealId>>,
     next_deal_id: u64,
+    /// Optional retention policy enforced when proposing new deals.
+    retention_policy: Option<RetentionPolicy>,
 }
 
 impl DealManager {
@@ -93,10 +97,19 @@ impl DealManager {
             index: HashMap::new(),
             data_index: HashMap::new(),
             next_deal_id: 1,
+            retention_policy: None,
         }
     }
 
+    /// Set a retention policy that will be enforced on all future deal proposals.
+    pub fn set_retention_policy(&mut self, policy: RetentionPolicy) {
+        self.retention_policy = Some(policy);
+    }
+
     /// Propose a new storage deal. Returns the deal ID.
+    ///
+    /// If a retention policy is set, the deal's duration must meet the minimum
+    /// required epochs, otherwise `DealError::RetentionPolicyViolation` is returned.
     pub fn propose_deal(
         &mut self,
         miner: String,
@@ -105,7 +118,16 @@ impl DealManager {
         size: u64,
         price_per_epoch: u64,
         duration_epochs: u64,
-    ) -> DealId {
+    ) -> Result<DealId, DealError> {
+        if let Some(ref policy) = self.retention_policy {
+            if duration_epochs < policy.min_deal_duration_epochs {
+                return Err(DealError::RetentionPolicyViolation {
+                    min_epochs: policy.min_deal_duration_epochs,
+                    actual_epochs: duration_epochs,
+                });
+            }
+        }
+
         let deal_id = format!("deal-{}", self.next_deal_id);
         self.next_deal_id += 1;
 
@@ -124,10 +146,13 @@ impl DealManager {
         };
 
         let vec_idx = self.deals.len();
-        self.data_index.entry(deal.data_cid.clone()).or_default().push(deal_id.clone());
+        self.data_index
+            .entry(deal.data_cid.clone())
+            .or_default()
+            .push(deal_id.clone());
         self.deals.push(deal);
         self.index.insert(deal_id.clone(), vec_idx);
-        deal_id
+        Ok(deal_id)
     }
 
     /// Remove a deal by ID. Returns the removed deal, or `None` if not found.
@@ -159,7 +184,10 @@ impl DealManager {
 
     /// Returns all deal IDs associated with a given data CID (renewal history).
     pub fn get_deals_by_data_cid(&self, data_cid: &str) -> &[DealId] {
-        self.data_index.get(data_cid).map(|v| v.as_slice()).unwrap_or(&[])
+        self.data_index
+            .get(data_cid)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Transition a deal from Proposed to Active, recording the current epoch.
@@ -167,7 +195,9 @@ impl DealManager {
     /// Returns `DealError::NotFound` if the deal doesn't exist.
     /// Returns `DealError::InvalidTransition` if the deal is not in `Proposed` state.
     pub fn activate_deal(&mut self, deal_id: &DealId, current_epoch: u64) -> Result<(), DealError> {
-        let &pos = self.index.get(deal_id.as_str())
+        let &pos = self
+            .index
+            .get(deal_id.as_str())
             .ok_or_else(|| DealError::NotFound(deal_id.clone()))?;
         let deal = &mut self.deals[pos];
         if deal.status != DealStatus::Proposed {
@@ -187,7 +217,9 @@ impl DealManager {
     /// Returns `DealError::InvalidTransition` if the deal is not `Active`.
     pub fn expire_deal(&mut self, deal_id: &DealId) -> Result<(), DealError> {
         {
-            let &pos = self.index.get(deal_id.as_str())
+            let &pos = self
+                .index
+                .get(deal_id.as_str())
                 .ok_or_else(|| DealError::NotFound(deal_id.clone()))?;
             if self.deals[pos].status != DealStatus::Active {
                 return Err(DealError::InvalidTransition {
@@ -206,7 +238,9 @@ impl DealManager {
     /// Returns `DealError::InvalidTransition` if the deal is not `Active`.
     pub fn slash_deal(&mut self, deal_id: &DealId) -> Result<(), DealError> {
         {
-            let &pos = self.index.get(deal_id.as_str())
+            let &pos = self
+                .index
+                .get(deal_id.as_str())
                 .ok_or_else(|| DealError::NotFound(deal_id.clone()))?;
             if self.deals[pos].status != DealStatus::Active {
                 return Err(DealError::InvalidTransition {
@@ -235,17 +269,21 @@ impl DealManager {
     /// Only the fields needed for `propose_deal` are read from the original;
     /// no full `StorageDeal` clone is performed.
     /// Returns the new deal ID, or `None` if the original was not found.
-    pub fn renew_deal(&mut self, deal_id: &str) -> Option<DealId> {
-        let &pos = self.index.get(deal_id)?;
+    /// Returns `Err` if the retention policy rejects the renewed duration.
+    pub fn renew_deal(&mut self, deal_id: &str) -> Result<Option<DealId>, DealError> {
+        let pos = match self.index.get(deal_id) {
+            Some(&p) => p,
+            None => return Ok(None),
+        };
         let orig = &self.deals[pos];
         let duration = orig.end_epoch - orig.start_epoch;
-        // Read only the fields that are needed; avoid cloning the entire struct.
         let miner = orig.miner.clone();
         let client = orig.client.clone();
         let data_cid = orig.data_cid.clone();
         let size = orig.size;
         let price_per_epoch = orig.price_per_epoch;
-        Some(self.propose_deal(miner, client, data_cid, size, price_per_epoch, duration))
+        self.propose_deal(miner, client, data_cid, size, price_per_epoch, duration)
+            .map(Some)
     }
 
     /// List all tracked deals.
@@ -275,6 +313,7 @@ mod tests {
             100,
             1000,
         )
+        .unwrap()
     }
 
     // ── Original tests ───────────────────────────────────────────────────────
@@ -282,14 +321,16 @@ mod tests {
     #[test]
     fn test_propose_deal() {
         let mut dm = DealManager::new();
-        let id = dm.propose_deal(
-            "miner-1".to_string(),
-            "client-1".to_string(),
-            "QmData".to_string(),
-            1024,
-            100,
-            1000,
-        );
+        let id = dm
+            .propose_deal(
+                "miner-1".to_string(),
+                "client-1".to_string(),
+                "QmData".to_string(),
+                1024,
+                100,
+                1000,
+            )
+            .unwrap();
         assert_eq!(id, "deal-1");
         assert_eq!(dm.list_deals().len(), 1);
         assert_eq!(dm.list_deals()[0].status, DealStatus::Proposed);
@@ -298,8 +339,12 @@ mod tests {
     #[test]
     fn test_deal_id_auto_increment() {
         let mut dm = DealManager::new();
-        let id1 = dm.propose_deal("m".into(), "c".into(), "d1".into(), 100, 10, 500);
-        let id2 = dm.propose_deal("m".into(), "c".into(), "d2".into(), 200, 20, 500);
+        let id1 = dm
+            .propose_deal("m".into(), "c".into(), "d1".into(), 100, 10, 500)
+            .unwrap();
+        let id2 = dm
+            .propose_deal("m".into(), "c".into(), "d2".into(), 200, 20, 500)
+            .unwrap();
         assert_eq!(id1, "deal-1");
         assert_eq!(id2, "deal-2");
     }
@@ -307,7 +352,9 @@ mod tests {
     #[test]
     fn test_check_deal_status() {
         let mut dm = DealManager::new();
-        let id = dm.propose_deal("m".into(), "c".into(), "d".into(), 100, 10, 500);
+        let id = dm
+            .propose_deal("m".into(), "c".into(), "d".into(), 100, 10, 500)
+            .unwrap();
         assert_eq!(dm.check_deal_status(&id), Some(&DealStatus::Proposed));
         assert_eq!(dm.check_deal_status("nonexistent"), None);
     }
@@ -315,8 +362,17 @@ mod tests {
     #[test]
     fn test_renew_deal() {
         let mut dm = DealManager::new();
-        let id = dm.propose_deal("miner".into(), "client".into(), "data".into(), 1024, 50, 1000);
-        let new_id = dm.renew_deal(&id).unwrap();
+        let id = dm
+            .propose_deal(
+                "miner".into(),
+                "client".into(),
+                "data".into(),
+                1024,
+                50,
+                1000,
+            )
+            .unwrap();
+        let new_id = dm.renew_deal(&id).unwrap().unwrap();
         assert_eq!(new_id, "deal-2");
         assert_eq!(dm.list_deals().len(), 2);
         // Renewed deal has same params
@@ -328,14 +384,15 @@ mod tests {
     #[test]
     fn test_renew_nonexistent_deal() {
         let mut dm = DealManager::new();
-        assert_eq!(dm.renew_deal("nope"), None);
+        assert_eq!(dm.renew_deal("nope").unwrap(), None);
     }
 
     #[test]
     fn test_list_deals() {
         let mut dm = DealManager::new();
         assert!(dm.list_deals().is_empty());
-        dm.propose_deal("m".into(), "c".into(), "d".into(), 100, 10, 500);
+        dm.propose_deal("m".into(), "c".into(), "d".into(), 100, 10, 500)
+            .unwrap();
         assert_eq!(dm.list_deals().len(), 1);
     }
 
@@ -347,16 +404,18 @@ mod tests {
     #[test]
     fn test_index_consistent_after_insert_renew_lookup() {
         let mut dm = DealManager::new();
-        let id = dm.propose_deal(
-            "miner-A".to_string(),
-            "client-A".to_string(),
-            "QmABC".to_string(),
-            2048,
-            200,
-            500,
-        );
+        let id = dm
+            .propose_deal(
+                "miner-A".to_string(),
+                "client-A".to_string(),
+                "QmABC".to_string(),
+                2048,
+                200,
+                500,
+            )
+            .unwrap();
 
-        let new_id = dm.renew_deal(&id).expect("renew should succeed");
+        let new_id = dm.renew_deal(&id).unwrap().expect("renew should succeed");
 
         // Original is still findable via O(1) index lookup.
         let original = dm.get_deal(&id).expect("original deal not found");
@@ -378,8 +437,12 @@ mod tests {
     #[test]
     fn test_index_consistent_after_remove() {
         let mut dm = DealManager::new();
-        let id1 = dm.propose_deal("m".into(), "c".into(), "d1".into(), 100, 10, 300);
-        let id2 = dm.propose_deal("m".into(), "c".into(), "d2".into(), 200, 20, 300);
+        let id1 = dm
+            .propose_deal("m".into(), "c".into(), "d1".into(), 100, 10, 300)
+            .unwrap();
+        let id2 = dm
+            .propose_deal("m".into(), "c".into(), "d2".into(), 200, 20, 300)
+            .unwrap();
 
         let removed = dm.remove_deal(&id1).expect("remove should return the deal");
         assert_eq!(removed.deal_id, id1);
@@ -404,7 +467,7 @@ mod tests {
         let id = make_deal(&mut dm);
         let orig = dm.get_deal(&id).unwrap().clone();
 
-        let new_id = dm.renew_deal(&id).expect("renew should succeed");
+        let new_id = dm.renew_deal(&id).unwrap().expect("renew should succeed");
         let renewed = dm.get_deal(&new_id).unwrap();
 
         // Identity / data fields are preserved.
@@ -434,8 +497,10 @@ mod tests {
     #[test]
     fn data_cid_index_tracks_renewals() {
         let mut dm = DealManager::new();
-        let id1 = dm.propose_deal("m".into(), "c".into(), "QmX".into(), 100, 10, 500);
-        let id2 = dm.renew_deal(&id1).unwrap();
+        let id1 = dm
+            .propose_deal("m".into(), "c".into(), "QmX".into(), 100, 10, 500)
+            .unwrap();
+        let id2 = dm.renew_deal(&id1).unwrap().unwrap();
         let ids = dm.get_deals_by_data_cid("QmX");
         assert!(ids.contains(&id1));
         assert!(ids.contains(&id2));
@@ -446,7 +511,9 @@ mod tests {
     #[test]
     fn activate_sets_start_epoch() {
         let mut dm = DealManager::new();
-        let id = dm.propose_deal("m".into(), "c".into(), "d".into(), 100, 10, 500);
+        let id = dm
+            .propose_deal("m".into(), "c".into(), "d".into(), 100, 10, 500)
+            .unwrap();
         dm.activate_deal(&id, 42).unwrap();
         let deal = dm.get_deal(&id).unwrap();
         assert_eq!(deal.start_epoch, 42);
@@ -457,7 +524,9 @@ mod tests {
     #[test]
     fn lifecycle_proposed_to_active_to_expired() {
         let mut dm = DealManager::new();
-        let id = dm.propose_deal("m".into(), "c".into(), "d".into(), 100, 10, 500);
+        let id = dm
+            .propose_deal("m".into(), "c".into(), "d".into(), 100, 10, 500)
+            .unwrap();
         dm.activate_deal(&id, 100).unwrap();
         dm.expire_deal(&id).unwrap();
         // Deal is removed on expiry.
@@ -469,11 +538,16 @@ mod tests {
     #[test]
     fn invalid_transition_rejected() {
         let mut dm = DealManager::new();
-        let id = dm.propose_deal("m".into(), "c".into(), "d".into(), 100, 10, 500);
+        let id = dm
+            .propose_deal("m".into(), "c".into(), "d".into(), 100, 10, 500)
+            .unwrap();
         let err = dm.expire_deal(&id).unwrap_err();
         assert!(matches!(
             err,
-            DealError::InvalidTransition { from: DealStatus::Proposed, to: DealStatus::Expired }
+            DealError::InvalidTransition {
+                from: DealStatus::Proposed,
+                to: DealStatus::Expired
+            }
         ));
     }
 
@@ -481,8 +555,12 @@ mod tests {
     #[test]
     fn removal_on_terminal_state() {
         let mut dm = DealManager::new();
-        let id1 = dm.propose_deal("m".into(), "c".into(), "d1".into(), 100, 10, 500);
-        let id2 = dm.propose_deal("m".into(), "c".into(), "d2".into(), 100, 10, 500);
+        let id1 = dm
+            .propose_deal("m".into(), "c".into(), "d1".into(), 100, 10, 500)
+            .unwrap();
+        let id2 = dm
+            .propose_deal("m".into(), "c".into(), "d2".into(), 100, 10, 500)
+            .unwrap();
         dm.activate_deal(&id1, 1).unwrap();
         dm.activate_deal(&id2, 1).unwrap();
         dm.expire_deal(&id1).unwrap();
@@ -490,5 +568,59 @@ mod tests {
         assert!(dm.get_deal(&id1).is_none(), "expired deal must be removed");
         assert!(dm.get_deal(&id2).is_none(), "slashed deal must be removed");
         assert_eq!(dm.list_deals().len(), 0);
+    }
+
+    // ── Retention policy enforcement ────────────────────────────────────────
+
+    #[test]
+    fn retention_policy_rejects_short_deal() {
+        let mut dm = DealManager::new();
+        dm.set_retention_policy(RetentionPolicy {
+            min_deal_duration_epochs: 1000,
+        });
+        let err = dm
+            .propose_deal("m".into(), "c".into(), "d".into(), 100, 10, 500)
+            .unwrap_err();
+        assert_eq!(
+            err,
+            DealError::RetentionPolicyViolation {
+                min_epochs: 1000,
+                actual_epochs: 500,
+            }
+        );
+        assert!(dm.list_deals().is_empty());
+    }
+
+    #[test]
+    fn retention_policy_accepts_sufficient_deal() {
+        let mut dm = DealManager::new();
+        dm.set_retention_policy(RetentionPolicy {
+            min_deal_duration_epochs: 500,
+        });
+        let id = dm
+            .propose_deal("m".into(), "c".into(), "d".into(), 100, 10, 500)
+            .unwrap();
+        assert_eq!(id, "deal-1");
+    }
+
+    #[test]
+    fn retention_policy_accepts_exact_minimum() {
+        let mut dm = DealManager::new();
+        dm.set_retention_policy(RetentionPolicy {
+            min_deal_duration_epochs: 1000,
+        });
+        let id = dm
+            .propose_deal("m".into(), "c".into(), "d".into(), 100, 10, 1000)
+            .unwrap();
+        assert_eq!(id, "deal-1");
+    }
+
+    #[test]
+    fn no_retention_policy_allows_any_duration() {
+        let mut dm = DealManager::new();
+        let id = dm
+            .propose_deal("m".into(), "c".into(), "d".into(), 100, 10, 1)
+            .unwrap();
+        assert_eq!(id, "deal-1");
     }
 }
