@@ -1,6 +1,7 @@
 pub mod access;
 pub mod archive_pipeline;
 pub mod budget;
+pub mod cost_estimator;
 pub mod metrics;
 pub mod migration;
 pub mod orchestrator;
@@ -11,6 +12,10 @@ pub mod tiers;
 
 pub use archive_pipeline::{ArchiveMetrics, ArchivePipeline};
 pub use budget::StorageBudget;
+pub use cost_estimator::{
+    ArweaveCostModel, CostEstimate, CostEstimator, FilecoinCostModel, IpfsCostModel,
+    StorageCostModel,
+};
 pub use metrics::{InMemoryMetrics, MetricsCollector};
 pub use orchestrator::{DataTieringOrchestrator, PublicInterestStoreResult};
 // ProvenancePolicy is now in wrfcoin-storage-common; re-export for backward compatibility.
