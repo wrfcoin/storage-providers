@@ -927,12 +927,7 @@ mod tests {
             payload: ReportPayload::Weather(WeatherPayload {
                 temperature_c: Some(18.0),
                 humidity_percent: Some(70.0),
-                pressure_hpa: None,
-                wind_speed_ms: None,
-                wind_direction_deg: None,
-                precipitation_mm: None,
-                dewpoint_c: None,
-                visibility_m: None,
+                ..Default::default()
             }),
             quality_score: Some(0.9),
             provenance: Some(MeteoChain::new(vec![
