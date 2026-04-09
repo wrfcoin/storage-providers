@@ -1,3 +1,4 @@
+pub mod chunking;
 pub mod compression;
 pub mod domain_index;
 pub mod error;
@@ -9,6 +10,7 @@ pub mod provenance;
 pub mod traits;
 pub mod types;
 
+pub use chunking::{AdaptiveChunker, ChunkManifest, ChunkSizeHeuristics, CompressionStrategy};
 pub use compression::{compress, decompress, is_compressed};
 pub use domain_index::{DomainContentIndex, IndexEntry};
 pub use error::StorageError;
