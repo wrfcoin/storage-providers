@@ -7,6 +7,7 @@ pub mod orchestrator;
 pub mod public_access;
 pub mod quality;
 pub mod retention;
+pub mod s3_gateway;
 pub mod tiers;
 
 pub use archive_pipeline::{ArchiveMetrics, ArchivePipeline};
@@ -20,4 +21,5 @@ pub use quality::{
     AccessControlPolicy, QualityRetentionManager, QualityRetentionPolicy, TrustClass,
 };
 pub use retention::RetentionManager;
+pub use s3_gateway::{BucketTierMapping, S3Gateway, S3GatewayError, S3Key};
 pub use tiers::TieringConfig;
