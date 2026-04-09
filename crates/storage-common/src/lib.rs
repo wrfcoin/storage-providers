@@ -1,4 +1,5 @@
 pub mod chunking;
+pub mod cf_metadata;
 pub mod compression;
 pub mod deduplication;
 pub mod domain_index;
@@ -12,6 +13,7 @@ pub mod traits;
 pub mod types;
 
 pub use chunking::{AdaptiveChunker, ChunkManifest, ChunkSizeHeuristics, CompressionStrategy};
+pub use cf_metadata::{CfGlobalAttributes, CfMetadata, CfRegistry, CfVariable};
 pub use compression::{compress, decompress, is_compressed};
 pub use deduplication::{DedupEntry, DeduplicationRegistry};
 pub use domain_index::{DomainContentIndex, IndexEntry};
