@@ -1,0 +1,35 @@
+[package]
+name = "wrfcoin-storage-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "HTTP server daemon exposing StorageProvider trait operations over REST"
+
+[[bin]]
+name = "storage-daemon"
+path = "src/main.rs"
+
+[dependencies]
+wrfcoin-storage-common = { path = "../storage-common" }
+wrfcoin-ipfs = { path = "../ipfs" }
+wrfcoin-filecoin = { path = "../filecoin" }
+wrfcoin-arweave = { path = "../arweave" }
+wrfcoin-data-tiering = { path = "../data-tiering" }
+
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace", "cors"] }
+hyper = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+base64 = "0.22"
+
+[dev-dependencies]

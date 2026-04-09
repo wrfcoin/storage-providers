@@ -7,6 +7,7 @@ members = [
     "crates/arweave",
     "crates/data-tiering",
     "crates/receipt-archiver",
+    "crates/storage-node",
 ]
 
 [workspace.package]
