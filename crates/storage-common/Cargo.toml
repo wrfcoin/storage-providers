@@ -9,6 +9,7 @@ description = "Shared types and traits for WRFCoin storage providers"
 [dependencies]
 wrfcoin-meteo-types.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
 sha2.workspace = true
@@ -18,5 +19,4 @@ flate2.workspace = true
 blake3.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
