@@ -7,6 +7,10 @@ use wrfcoin_meteo_types as mt;
 // Re-export canonical environmental types from meteo-types.
 pub use mt::{EnvironmentalDomain, EnvironmentalReport, GeoLocation, ReportPayload};
 
+// Re-export quality types so callers (e.g. data-tiering) can make quality-aware routing
+// decisions without importing wrfcoin-meteo-types directly.
+pub use mt::{DataQualityBand, DataQualityScore, WeatherObservation};
+
 // Type aliases — keep existing names for all callers in this workspace.
 pub type WeatherPayload = mt::WeatherObservation;
 pub type AirQualityPayload = mt::AirQualityPayload;
@@ -43,6 +47,119 @@ pub struct Metadata {
     pub timestamp: u64,
     /// Arbitrary key-value tags for classification.
     pub tags: HashMap<String, String>,
+}
+
+/// Typed storage metadata that carries canonical meteo-types fields alongside
+/// the base [`Metadata`].
+///
+/// Use `StorageMetadata` instead of plain `Metadata` when storing environmental
+/// observation data so that the `data-tiering` crate can make quality-aware and
+/// domain-aware routing decisions without re-parsing stored content.
+///
+/// # Alignment with meteo-types
+///
+/// - [`EnvironmentalDomain`] identifies the observation category (Weather, AirQuality,
+///   Soil, …) and drives the domain index in `DomainContentIndex`.
+/// - [`DataQualityBand`] is derived from [`DataQualityScore::band()`] and directly maps
+///   to tiering policy: `High` → Hot, `Borderline` → Warm, `WarningOnly` / `Low` → Cold
+///   or Archive.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StorageMetadata {
+    /// Base storage metadata (content-type, size, timestamp, freeform tags).
+    pub base: Metadata,
+    /// Environmental observation domain, if known.
+    ///
+    /// `None` for non-meteo content (e.g. raw binary blobs).
+    pub domain: Option<EnvironmentalDomain>,
+    /// Quality band classification for data-tiering routing decisions.
+    ///
+    /// `None` when quality scoring has not been performed.
+    pub quality_band: Option<DataQualityBand>,
+    /// Structured quality score (overall, range_score, consistency_score).
+    ///
+    /// `None` when quality scoring has not been performed.
+    pub quality_score: Option<DataQualityScore>,
+    /// Station or sensor identifier that produced the observation.
+    ///
+    /// Used to group related content in the domain index.
+    pub station_id: Option<String>,
+    /// Canonical report identifier from `EnvironmentalReport::report_id`.
+    ///
+    /// Enables content-addressed deduplication: the same report must not be
+    /// stored twice.
+    pub report_id: Option<String>,
+}
+
+impl StorageMetadata {
+    /// Construct `StorageMetadata` from base metadata with no meteo context.
+    pub fn from_base(base: Metadata) -> Self {
+        Self {
+            base,
+            domain: None,
+            quality_band: None,
+            quality_score: None,
+            station_id: None,
+            report_id: None,
+        }
+    }
+
+    /// Construct `StorageMetadata` from an `EnvironmentalReport`.
+    ///
+    /// The quality band and score are populated from `report.quality_score` if present.
+    pub fn from_report(report: &EnvironmentalReport) -> Self {
+        let quality_score_val = report.quality_score;
+        let quality_score = quality_score_val.and_then(|s| {
+            DataQualityScore::new(s, s, s).ok()
+        });
+        let quality_band = quality_score_val.map(DataQualityBand::from_score);
+
+        let mut tags = HashMap::new();
+        tags.insert("report_id".to_string(), report.report_id.clone());
+        tags.insert("station_id".to_string(), report.station_id.clone());
+        tags.insert("domain".to_string(), format!("{:?}", report.domain));
+
+        Self {
+            base: Metadata {
+                content_type: "application/json".to_string(),
+                size: 0, // caller fills in after serializing
+                timestamp: report.submitted_at,
+                tags,
+            },
+            domain: Some(report.domain),
+            quality_band,
+            quality_score,
+            station_id: Some(report.station_id.clone()),
+            report_id: Some(report.report_id.clone()),
+        }
+    }
+
+    /// Returns `true` if the quality band is `High` or `Borderline`.
+    ///
+    /// Convenience method used by tiering logic to decide whether content should
+    /// be stored in a warm-or-hotter tier.
+    pub fn is_quality_acceptable(&self) -> bool {
+        matches!(
+            self.quality_band,
+            Some(DataQualityBand::High) | Some(DataQualityBand::Borderline)
+        )
+    }
+
+    /// Suggest a [`DataTier`] based on the quality band.
+    ///
+    /// | Band | Suggested tier |
+    /// |------|---------------|
+    /// | `High` | Hot |
+    /// | `Borderline` | Warm |
+    /// | `WarningOnly` | Cold |
+    /// | `Low` / `None` | Archive |
+    pub fn suggested_tier(&self) -> DataTier {
+        match self.quality_band {
+            Some(DataQualityBand::High) => DataTier::Hot,
+            Some(DataQualityBand::Borderline) => DataTier::Warm,
+            Some(DataQualityBand::WarningOnly) => DataTier::Cold,
+            _ => DataTier::Archive,
+        }
+    }
 }
 
 /// Receipt returned after a successful storage operation.
@@ -511,6 +628,7 @@ mod tests {
                 precipitation_mm: None,
                 dewpoint_c: None,
                 visibility_m: Some(10_000.0),
+                ..Default::default()
             }),
             quality_score: Some(0.95),
             provenance: None,
@@ -662,13 +780,7 @@ mod tests {
             // Wildfire domain but Weather payload — should fail validation
             payload: ReportPayload::Weather(WeatherPayload {
                 temperature_c: Some(30.0),
-                humidity_percent: None,
-                pressure_hpa: None,
-                wind_speed_ms: None,
-                wind_direction_deg: None,
-                precipitation_mm: None,
-                dewpoint_c: None,
-                visibility_m: None,
+                ..Default::default()
             }),
             quality_score: None,
             provenance: None,
@@ -1152,5 +1264,173 @@ mod tests {
         }
         let err = validate_report_payload(&report.payload).unwrap_err();
         assert!(err.contains("reservoir_storage"));
+    }
+
+    // ---- StorageMetadata tests ----
+
+    fn sample_env_report() -> EnvironmentalReport {
+        EnvironmentalReport {
+            report_id: "sm-test-001".to_string(),
+            domain: EnvironmentalDomain::Weather,
+            station_id: "stn-sm-1".to_string(),
+            location: GeoLocation { latitude: 40.0, longitude: -105.0, altitude_m: None },
+            observed_at: 1_000_000,
+            submitted_at: 1_000_001,
+            payload: ReportPayload::Weather(WeatherPayload {
+                temperature_c: Some(20.0),
+                humidity_percent: Some(60.0),
+                pressure_hpa: Some(1013.0),
+                ..Default::default()
+            }),
+            quality_score: Some(0.92),
+            provenance: None,
+        }
+    }
+
+    #[test]
+    fn test_storage_metadata_from_report_sets_domain() {
+        let report = sample_env_report();
+        let meta = StorageMetadata::from_report(&report);
+        assert_eq!(meta.domain, Some(EnvironmentalDomain::Weather));
+    }
+
+    #[test]
+    fn test_storage_metadata_from_report_sets_quality_band_high() {
+        let report = sample_env_report(); // quality_score = 0.92 → High
+        let meta = StorageMetadata::from_report(&report);
+        assert_eq!(meta.quality_band, Some(DataQualityBand::High));
+    }
+
+    #[test]
+    fn test_storage_metadata_from_report_borderline_quality() {
+        let mut report = sample_env_report();
+        report.quality_score = Some(0.75); // 0.75 → Borderline
+        let meta = StorageMetadata::from_report(&report);
+        assert_eq!(meta.quality_band, Some(DataQualityBand::Borderline));
+    }
+
+    #[test]
+    fn test_storage_metadata_from_report_warning_only_quality() {
+        let mut report = sample_env_report();
+        report.quality_score = Some(0.55); // 0.55 → WarningOnly
+        let meta = StorageMetadata::from_report(&report);
+        assert_eq!(meta.quality_band, Some(DataQualityBand::WarningOnly));
+    }
+
+    #[test]
+    fn test_storage_metadata_from_report_low_quality() {
+        let mut report = sample_env_report();
+        report.quality_score = Some(0.30); // 0.30 → Low
+        let meta = StorageMetadata::from_report(&report);
+        assert_eq!(meta.quality_band, Some(DataQualityBand::Low));
+    }
+
+    #[test]
+    fn test_storage_metadata_from_report_no_quality_score() {
+        let mut report = sample_env_report();
+        report.quality_score = None;
+        let meta = StorageMetadata::from_report(&report);
+        assert_eq!(meta.quality_band, None);
+        assert_eq!(meta.quality_score, None);
+    }
+
+    #[test]
+    fn test_storage_metadata_from_report_sets_station_and_report_id() {
+        let report = sample_env_report();
+        let meta = StorageMetadata::from_report(&report);
+        assert_eq!(meta.station_id.as_deref(), Some("stn-sm-1"));
+        assert_eq!(meta.report_id.as_deref(), Some("sm-test-001"));
+    }
+
+    #[test]
+    fn test_storage_metadata_suggested_tier_high_is_hot() {
+        let mut report = sample_env_report();
+        report.quality_score = Some(0.90);
+        let meta = StorageMetadata::from_report(&report);
+        assert_eq!(meta.suggested_tier(), DataTier::Hot);
+    }
+
+    #[test]
+    fn test_storage_metadata_suggested_tier_borderline_is_warm() {
+        let mut report = sample_env_report();
+        report.quality_score = Some(0.75);
+        let meta = StorageMetadata::from_report(&report);
+        assert_eq!(meta.suggested_tier(), DataTier::Warm);
+    }
+
+    #[test]
+    fn test_storage_metadata_suggested_tier_warning_only_is_cold() {
+        let mut report = sample_env_report();
+        report.quality_score = Some(0.60);
+        let meta = StorageMetadata::from_report(&report);
+        assert_eq!(meta.suggested_tier(), DataTier::Cold);
+    }
+
+    #[test]
+    fn test_storage_metadata_suggested_tier_low_is_archive() {
+        let mut report = sample_env_report();
+        report.quality_score = Some(0.30);
+        let meta = StorageMetadata::from_report(&report);
+        assert_eq!(meta.suggested_tier(), DataTier::Archive);
+    }
+
+    #[test]
+    fn test_storage_metadata_suggested_tier_no_quality_is_archive() {
+        let mut report = sample_env_report();
+        report.quality_score = None;
+        let meta = StorageMetadata::from_report(&report);
+        assert_eq!(meta.suggested_tier(), DataTier::Archive);
+    }
+
+    #[test]
+    fn test_storage_metadata_is_quality_acceptable_high() {
+        let mut report = sample_env_report();
+        report.quality_score = Some(0.90);
+        let meta = StorageMetadata::from_report(&report);
+        assert!(meta.is_quality_acceptable());
+    }
+
+    #[test]
+    fn test_storage_metadata_is_quality_acceptable_borderline() {
+        let mut report = sample_env_report();
+        report.quality_score = Some(0.75);
+        let meta = StorageMetadata::from_report(&report);
+        assert!(meta.is_quality_acceptable());
+    }
+
+    #[test]
+    fn test_storage_metadata_is_quality_not_acceptable_warning() {
+        let mut report = sample_env_report();
+        report.quality_score = Some(0.60);
+        let meta = StorageMetadata::from_report(&report);
+        assert!(!meta.is_quality_acceptable());
+    }
+
+    #[test]
+    fn test_storage_metadata_from_base() {
+        let base = Metadata {
+            content_type: "application/octet-stream".to_string(),
+            size: 1024,
+            timestamp: 2000,
+            tags: HashMap::new(),
+        };
+        let meta = StorageMetadata::from_base(base);
+        assert!(meta.domain.is_none());
+        assert!(meta.quality_band.is_none());
+        assert!(meta.station_id.is_none());
+        assert!(meta.report_id.is_none());
+        assert_eq!(meta.base.size, 1024);
+    }
+
+    #[test]
+    fn test_storage_metadata_serde_roundtrip() {
+        let report = sample_env_report();
+        let meta = StorageMetadata::from_report(&report);
+        let json = serde_json::to_string(&meta).expect("serialize StorageMetadata");
+        let decoded: StorageMetadata =
+            serde_json::from_str(&json).expect("deserialize StorageMetadata");
+        assert_eq!(decoded.domain, meta.domain);
+        assert_eq!(decoded.quality_band, meta.quality_band);
+        assert_eq!(decoded.station_id, meta.station_id);
     }
 }
