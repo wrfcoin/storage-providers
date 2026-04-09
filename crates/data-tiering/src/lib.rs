@@ -3,6 +3,7 @@ pub mod analytics;
 pub mod archive_pipeline;
 pub mod budget;
 pub mod cost_estimator;
+pub mod cross_provider_migration;
 pub mod metrics;
 pub mod migration;
 pub mod orchestrator;
@@ -23,6 +24,10 @@ pub use budget::StorageBudget;
 pub use cost_estimator::{
     ArweaveCostModel, CostEstimate, CostEstimator, FilecoinCostModel, IpfsCostModel,
     StorageCostModel,
+};
+pub use cross_provider_migration::{
+    CrossProviderMigrationRequest, CrossProviderMigrationSummary, CrossProviderMigrator,
+    MigrationJobStatus, VerificationResult,
 };
 pub use metrics::{InMemoryMetrics, MetricsCollector};
 pub use orchestrator::{DataTieringOrchestrator, PublicInterestStoreResult};
