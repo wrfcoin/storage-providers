@@ -262,6 +262,10 @@ impl CostEstimator {
     /// Estimate costs for all registered providers, sorted cheapest-first by
     /// `total_cost`.
     ///
+    /// **Currency requirement:** All estimates must use the same currency for
+    /// comparison to be meaningful. If estimates have different currencies, they are
+    /// returned in the order received (unsorted), with earlier currencies taking precedence.
+    ///
     /// Providers whose estimation fails are silently omitted.
     pub async fn compare(
         &self,
@@ -269,16 +273,32 @@ impl CostEstimator {
         duration_secs: u64,
     ) -> Vec<(String, CostEstimate)> {
         let mut results = Vec::new();
+        let mut common_currency: Option<String> = None;
+
         for model in &self.models {
             if let Ok(estimate) = model.estimate_cost(size_bytes, duration_secs).await {
+                // Check currency consistency
+                if let Some(ref expected_currency) = common_currency {
+                    if estimate.currency != *expected_currency {
+                        // Skip cross-currency estimates; do not sort them
+                        continue;
+                    }
+                } else {
+                    common_currency = Some(estimate.currency.clone());
+                }
                 results.push((model.provider_name().to_string(), estimate));
             }
         }
-        results.sort_by(|a, b| {
-            a.1.total_cost
-                .partial_cmp(&b.1.total_cost)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+
+        // Sort only if all estimates share the same currency
+        if common_currency.is_some() {
+            results.sort_by(|a, b| {
+                a.1.total_cost
+                    .partial_cmp(&b.1.total_cost)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
+
         results
     }
 
@@ -287,11 +307,13 @@ impl CostEstimator {
     /// # Parameters
     /// - `health`: map of provider name → healthy. Providers absent from the map
     ///   are treated as healthy.
-    /// - `max_budget`: optional total-cost ceiling. Comparison is in the model's
-    ///   native currency; budget filtering is most useful when all models share
-    ///   a common currency (e.g. all USD).
+    /// - `max_budget`: optional total-cost ceiling in the common currency. Only
+    ///   meaningful when all models share a common currency. Estimates with
+    ///   mismatched currencies are skipped during ranking.
     ///
-    /// Returns `None` if no provider passes both checks.
+    /// # Returns
+    /// `Some(estimate)` for the cheapest healthy provider within budget, or
+    /// `None` if no provider passes both checks.
     pub async fn cheapest_provider(
         &self,
         size_bytes: u64,
@@ -534,6 +556,23 @@ mod tests {
         assert!(results.is_empty());
     }
 
+    #[tokio::test]
+    async fn test_compare_skips_cross_currency() {
+        let mut estimator = CostEstimator::new();
+        // All USD: cheap=1.0 USD, mid=10.0 USD
+        estimator.add_model(Box::new(MockModel { name: "usd_cheap", fixed_total: 1.0, currency: "USD" }));
+        estimator.add_model(Box::new(MockModel { name: "usd_mid", fixed_total: 10.0, currency: "USD" }));
+        // Different currency: 0.001 FIL (looks cheaper in raw number but incomparable)
+        estimator.add_model(Box::new(MockModel { name: "fil_tiny", fixed_total: 0.001, currency: "FIL" }));
+
+        let results = estimator.compare(ONE_GIB, ONE_DAY_SECS).await;
+
+        // Only USD estimates are returned and sorted; FIL is skipped
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0, "usd_cheap");
+        assert_eq!(results[1].0, "usd_mid");
+    }
+
     // ── CostEstimator — cheapest_provider ─────────────────────────────────────
 
     #[tokio::test]
@@ -657,17 +696,43 @@ mod tests {
     #[tokio::test]
     async fn test_full_estimator_with_real_models() {
         let mut estimator = CostEstimator::new();
-        estimator.add_model(Box::new(IpfsCostModel::default())); // free
-        estimator.add_model(Box::new(FilecoinCostModel::default())); // FIL
-        estimator.add_model(Box::new(ArweaveCostModel::default())); // AR
+        estimator.add_model(Box::new(IpfsCostModel::default())); // "free" currency
+        estimator.add_model(Box::new(FilecoinCostModel::default())); // "FIL" currency
+        estimator.add_model(Box::new(ArweaveCostModel::default())); // "AR" currency
 
         let results = estimator.compare(ONE_GIB, THIRTY_DAYS_SECS).await;
 
-        assert_eq!(results.len(), 3);
-        // Local IPFS is free, so it sorts first
+        // Cross-currency estimates are skipped. Only the first currency encountered
+        // (IPFS with "free") is included; Filecoin (FIL) and Arweave (AR) are filtered out.
+        assert_eq!(results.len(), 1);
         assert_eq!(results[0].0, "ipfs");
-        // All results are valid
+        assert_eq!(results[0].1.currency, "free");
+    }
+
+    #[tokio::test]
+    async fn test_full_estimator_with_usd_models() {
+        // When all models return the same currency, all results are included
+        let mut estimator = CostEstimator::new();
+        estimator.add_model(Box::new(IpfsCostModel {
+            is_local: false,
+            remote_usd_per_gib_per_month: 0.15,
+        })); // USD
+        estimator.add_model(Box::new(FilecoinCostModel {
+            max_price_per_gib_epoch: 100_000_000, // Will convert to USD via fil_usd_rate
+            fil_usd_rate: 5.0,
+        })); // USD (after conversion)
+        estimator.add_model(Box::new(ArweaveCostModel {
+            ar_per_kib: 0.0001,
+            gateway_winston: None,
+            ar_usd_rate: 10.0,
+        })); // USD (after conversion)
+
+        let results = estimator.compare(ONE_GIB, THIRTY_DAYS_SECS).await;
+
+        // All three models return USD estimates, so all are included and sorted
+        assert_eq!(results.len(), 3);
         for (_, est) in &results {
+            assert_eq!(est.currency, "USD");
             assert!(est.total_cost.is_finite());
             assert!(est.total_cost >= 0.0);
         }
