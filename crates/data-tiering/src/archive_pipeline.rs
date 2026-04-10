@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use wrfcoin_storage_common::deduplication::DeduplicationRegistry;
 use wrfcoin_storage_common::error::StorageError;
 use wrfcoin_storage_common::integrity::IntegrityVerifier;
 use wrfcoin_storage_common::provenance::{ProvenancePolicy, ProvenanceValidator};
@@ -73,6 +74,7 @@ pub struct ArchivePipeline {
     metrics_collector: Option<Arc<dyn MetricsCollector>>,
     provenance_validator: Option<ProvenanceValidator>,
     quarantine_log: std::sync::Mutex<Vec<QuarantineRecord>>,
+    dedup_registry: Arc<DeduplicationRegistry>,
 }
 
 impl ArchivePipeline {
@@ -86,6 +88,7 @@ impl ArchivePipeline {
             metrics_collector: None,
             provenance_validator: None,
             quarantine_log: std::sync::Mutex::new(Vec::new()),
+            dedup_registry: Arc::new(DeduplicationRegistry::new()),
         }
     }
 
@@ -104,11 +107,19 @@ impl ArchivePipeline {
         self.metrics_collector = Some(collector);
     }
 
+    /// Get access to the deduplication registry.
+    pub fn dedup_registry(&self) -> Arc<DeduplicationRegistry> {
+        Arc::clone(&self.dedup_registry)
+    }
+
     /// Archive data to >= min_copies providers with integrity verification.
     ///
     /// Computes a canonical blake3 hash and stores the data to each configured
-    /// provider. Returns an `ArchiveReceipt` if at least `min_copies` providers
-    /// succeed. Otherwise returns a `StorageError::ProviderError`.
+    /// provider. Checks the deduplication registry first — if a provider already has
+    /// a copy, skips the store and uses the cached ContentId.
+    ///
+    /// Returns an `ArchiveReceipt` if at least `min_copies` providers have a copy
+    /// (either newly stored or cached). Otherwise returns a `StorageError::ProviderError`.
     pub async fn archive(
         &self,
         data: &[u8],
@@ -124,8 +135,35 @@ impl ArchivePipeline {
                 let mut m = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
                 m.archive_attempts += 1;
             }
-            match provider.store(data, metadata).await {
-                Ok(content_id) => {
+
+            // Check if this provider already has a copy via deduplication registry
+            let existing_content_id = self.dedup_registry
+                .lookup(&canonical_hash, name)
+                .unwrap_or(None);
+
+            let result = if let Some(content_id) = existing_content_id {
+                // Provider already has this content — skip store and use cached copy
+                Ok((content_id, true)) // true = was cached
+            } else {
+                // Provider doesn't have it — store it
+                match provider.store(data, metadata).await {
+                    Ok(content_id) => Ok((content_id, false)), // false = was not cached
+                    Err(e) => Err(e),
+                }
+            };
+
+            match result {
+                Ok((content_id, was_cached)) => {
+                    // Only add to registry if this was a new store (not a cache hit)
+                    if !was_cached {
+                        let _ = self.dedup_registry.insert(
+                            canonical_hash.clone(),
+                            data.len() as u64,
+                            content_id.clone(),
+                            timestamp,
+                        );
+                    }
+
                     receipts.push(StorageReceipt {
                         content_id,
                         provider: name.clone(),
@@ -344,3 +382,244 @@ impl ArchivePipeline {
             .clone()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use wrfcoin_storage_common::types::ContentId;
+
+    /// Mock storage provider for testing.
+    struct MockStorageProvider {
+        provider_name: String,
+        data: std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
+        store_call_count: std::sync::atomic::AtomicU64,
+    }
+
+    impl MockStorageProvider {
+        fn new(provider_name: &str) -> Self {
+            Self {
+                provider_name: provider_name.to_string(),
+                data: std::sync::Mutex::new(std::collections::HashMap::new()),
+                store_call_count: std::sync::atomic::AtomicU64::new(0),
+            }
+        }
+
+        fn store_call_count(&self) -> u64 {
+            self.store_call_count.load(std::sync::atomic::Ordering::Relaxed)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl StorageProvider for MockStorageProvider {
+        async fn store(
+            &self,
+            data: &[u8],
+            _metadata: &Metadata,
+        ) -> Result<ContentId, StorageError> {
+            self.store_call_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let ipfs_cid = wrfcoin_storage_common::ipfs_content_id(data);
+            self.data
+                .lock()
+                .unwrap()
+                .insert(ipfs_cid.hash.clone(), data.to_vec());
+            // Return a ContentId with this provider's name but the same hash
+            Ok(ContentId {
+                provider: self.provider_name.clone(),
+                hash: ipfs_cid.hash,
+            })
+        }
+
+        async fn retrieve(&self, id: &ContentId) -> Result<Vec<u8>, StorageError> {
+            self.data
+                .lock()
+                .unwrap()
+                .get(&id.hash)
+                .cloned()
+                .ok_or_else(|| StorageError::NotFound(id.hash.clone()))
+        }
+
+        async fn exists(&self, id: &ContentId) -> Result<bool, StorageError> {
+            Ok(self.data.lock().unwrap().contains_key(&id.hash))
+        }
+
+        async fn delete(&self, id: &ContentId) -> Result<(), StorageError> {
+            self.data.lock().unwrap().remove(&id.hash);
+            Ok(())
+        }
+
+        async fn health_check(&self) -> Result<wrfcoin_storage_common::types::HealthStatus, StorageError> {
+            Ok(wrfcoin_storage_common::types::HealthStatus {
+                healthy: true,
+                provider: "mock".to_string(),
+                latency_ms: Some(1),
+                message: Some("mock".to_string()),
+            })
+        }
+
+        async fn stats(&self) -> Result<wrfcoin_storage_common::types::StorageStats, StorageError> {
+            Ok(wrfcoin_storage_common::types::StorageStats {
+                total_stored: 0,
+                total_retrieved: 0,
+                total_bytes: 0,
+                cache_hits: 0,
+                cache_misses: 0,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_archive_same_data_twice_skips_second_store() {
+        let mut pipeline = ArchivePipeline::new(1);
+        let mock_provider = Arc::new(MockStorageProvider::new("ipfs"));
+        pipeline.add_provider("ipfs", mock_provider.clone() as Arc<dyn StorageProvider>);
+
+        let test_data = b"test weather data";
+        let metadata = Metadata {
+            content_type: "application/octet-stream".to_string(),
+            size: test_data.len() as u64,
+            timestamp: 1000,
+            tags: std::collections::HashMap::new(),
+        };
+
+        // First archive call
+        let result1 = pipeline.archive(test_data, &metadata).await;
+        assert!(result1.is_ok());
+        assert_eq!(mock_provider.store_call_count(), 1);
+
+        // Second archive call with same data
+        let result2 = pipeline.archive(test_data, &metadata).await;
+        assert!(result2.is_ok());
+
+        // Second call should NOT have called store again (dedup)
+        assert_eq!(mock_provider.store_call_count(), 1);
+
+        // Both receipts should have the same ContentId
+        assert_eq!(result1.unwrap().provider_receipts[0].content_id,
+                   result2.unwrap().provider_receipts[0].content_id);
+    }
+
+    #[tokio::test]
+    async fn test_archive_different_data_stores_separately() {
+        let mut pipeline = ArchivePipeline::new(1);
+        let mock_provider = Arc::new(MockStorageProvider::new("ipfs"));
+        pipeline.add_provider("ipfs", mock_provider.clone() as Arc<dyn StorageProvider>);
+
+        let data1 = b"test data 1";
+        let data2 = b"test data 2";
+        let metadata = Metadata {
+            content_type: "application/octet-stream".to_string(),
+            size: 11,
+            timestamp: 1000,
+            tags: std::collections::HashMap::new(),
+        };
+
+        let result1 = pipeline.archive(data1, &metadata).await;
+        assert!(result1.is_ok());
+        assert_eq!(mock_provider.store_call_count(), 1);
+
+        let result2 = pipeline.archive(data2, &metadata).await;
+        assert!(result2.is_ok());
+        assert_eq!(mock_provider.store_call_count(), 2);
+
+        // Different data should produce different ContentIds
+        assert_ne!(result1.unwrap().provider_receipts[0].content_id,
+                   result2.unwrap().provider_receipts[0].content_id);
+    }
+
+    #[tokio::test]
+    async fn test_archive_with_multiple_providers_deduplicates() {
+        let mut pipeline = ArchivePipeline::new(2);
+        let ipfs_provider = Arc::new(MockStorageProvider::new("ipfs"));
+        let filecoin_provider = Arc::new(MockStorageProvider::new("filecoin"));
+        pipeline.add_provider("ipfs", ipfs_provider.clone() as Arc<dyn StorageProvider>);
+        pipeline.add_provider("filecoin", filecoin_provider.clone() as Arc<dyn StorageProvider>);
+
+        let test_data = b"weather observation data";
+        let metadata = Metadata {
+            content_type: "application/json".to_string(),
+            size: test_data.len() as u64,
+            timestamp: 1000,
+            tags: std::collections::HashMap::new(),
+        };
+
+        // First archive — both providers should store
+        let result1 = pipeline.archive(test_data, &metadata).await;
+        assert!(result1.is_ok());
+        assert_eq!(ipfs_provider.store_call_count(), 1);
+        assert_eq!(filecoin_provider.store_call_count(), 1);
+
+        // Second archive with same data — neither should store
+        let result2 = pipeline.archive(test_data, &metadata).await;
+        assert!(result2.is_ok());
+        assert_eq!(ipfs_provider.store_call_count(), 1);
+        assert_eq!(filecoin_provider.store_call_count(), 1);
+
+        // All four receipts (2 from each call, 2 providers) should reference the same blobs
+        let r1 = result1.unwrap();
+        let r2 = result2.unwrap();
+        assert_eq!(r1.provider_receipts.len(), 2);
+        assert_eq!(r2.provider_receipts.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_dedup_registry_can_be_accessed() {
+        let pipeline = ArchivePipeline::new(1);
+        let registry = pipeline.dedup_registry();
+
+        // Registry should be empty initially
+        assert!(registry.is_empty().unwrap());
+
+        let test_data = b"test";
+        let metadata = Metadata {
+            content_type: "application/octet-stream".to_string(),
+            size: 4,
+            timestamp: 1000,
+            tags: std::collections::HashMap::new(),
+        };
+
+        // Create a provider and add it
+        let mock_provider = Arc::new(MockStorageProvider::new("ipfs"));
+        let mut pipeline = ArchivePipeline::new(1);
+        pipeline.add_provider("ipfs", mock_provider);
+        let registry = pipeline.dedup_registry();
+
+        // Archive some data
+        let _ = pipeline.archive(test_data, &metadata).await;
+
+        // Registry should now have an entry
+        assert!(!registry.is_empty().unwrap());
+        assert!(registry.len().unwrap() > 0);
+    }
+
+    #[tokio::test]
+    async fn test_archive_preserves_data_through_dedup() {
+        let mut pipeline = ArchivePipeline::new(1);
+        let mock_provider = Arc::new(MockStorageProvider::new("ipfs"));
+        pipeline.add_provider("ipfs", mock_provider.clone() as Arc<dyn StorageProvider>);
+
+        let test_data = b"important weather station data";
+        let metadata = Metadata {
+            content_type: "application/json".to_string(),
+            size: test_data.len() as u64,
+            timestamp: 1000,
+            tags: std::collections::HashMap::new(),
+        };
+
+        // Archive data twice
+        let result1 = pipeline.archive(test_data, &metadata).await;
+        assert!(result1.is_ok());
+
+        let result2 = pipeline.archive(test_data, &metadata).await;
+        assert!(result2.is_ok());
+
+        // Retrieve from both and verify
+        let receipt1 = result1.unwrap();
+        let content_id1 = &receipt1.provider_receipts[0].content_id;
+
+        let retrieved = mock_provider.retrieve(content_id1).await;
+        assert!(retrieved.is_ok());
+        assert_eq!(retrieved.unwrap(), test_data);
+    }
+}
+
