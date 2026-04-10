@@ -8,6 +8,7 @@ pub mod migration;
 pub mod orchestrator;
 pub mod public_access;
 pub mod quality;
+pub mod remote_pinning;
 pub mod retention;
 pub mod tiers;
 
@@ -29,6 +30,9 @@ pub use wrfcoin_storage_common::provenance::ProvenancePolicy;
 pub use public_access::{AccessCheckResult, AccessTier, PublicInterestAccessManager, PublicInterestAccessPolicy};
 pub use quality::{
     AccessControlPolicy, QualityRetentionManager, QualityRetentionPolicy, TrustClass,
+};
+pub use remote_pinning::{
+    RemotePinServiceConfig, RemotePinStatus, RemotePinningClient, RemotePinningManager,
 };
 pub use retention::RetentionManager;
 pub use tiers::TieringConfig;
