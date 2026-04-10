@@ -1,4 +1,5 @@
 pub mod compression;
+pub mod deduplication;
 pub mod domain_index;
 pub mod error;
 pub mod failover;
@@ -10,6 +11,7 @@ pub mod traits;
 pub mod types;
 
 pub use compression::{compress, decompress, is_compressed};
+pub use deduplication::{DedupEntry, DeduplicationRegistry};
 pub use domain_index::{DomainContentIndex, IndexEntry};
 pub use error::StorageError;
 pub use failover::{CircuitBreaker, CircuitState, FailoverMetrics, FailoverRouter};
