@@ -1,4 +1,5 @@
 pub mod access;
+pub mod analytics;
 pub mod archive_pipeline;
 pub mod budget;
 pub mod metrics;
@@ -9,6 +10,11 @@ pub mod quality;
 pub mod retention;
 pub mod tiers;
 
+pub use analytics::{
+    AnalyticsInput, BudgetSnapshot, DomainSnapshot, FailoverSnapshot, ProviderInput,
+    ProviderSnapshot, SlaSnapshot, StorageAnalytics, StorageSnapshot, TierBudgetEntry,
+    TierSnapshot,
+};
 pub use archive_pipeline::{ArchiveMetrics, ArchivePipeline};
 pub use budget::StorageBudget;
 pub use metrics::{InMemoryMetrics, MetricsCollector};
