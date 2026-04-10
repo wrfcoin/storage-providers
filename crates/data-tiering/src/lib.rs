@@ -10,6 +10,7 @@ pub mod public_access;
 pub mod quality;
 pub mod remote_pinning;
 pub mod retention;
+pub mod s3_gateway;
 pub mod tiers;
 
 pub use analytics::{
@@ -35,4 +36,5 @@ pub use remote_pinning::{
     RemotePinServiceConfig, RemotePinStatus, RemotePinningClient, RemotePinningManager,
 };
 pub use retention::RetentionManager;
+pub use s3_gateway::{BucketTierMapping, S3Gateway, S3GatewayError, S3Key};
 pub use tiers::TieringConfig;
