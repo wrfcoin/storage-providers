@@ -6,6 +6,7 @@ members = [
     "crates/filecoin",
     "crates/arweave",
     "crates/data-tiering",
+    "crates/receipt-archiver",
 ]
 
 [workspace.package]
