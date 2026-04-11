@@ -66,19 +66,53 @@ fn is_warm_enough(actual: &DataTier, required: &DataTier) -> bool {
 }
 
 /// Manages public-interest access enforcement.
+///
+/// # Governance Overrides
+///
+/// The manager supports governance-driven overrides that temporarily grant `OpenAccess`
+/// to specific report classes, superseding any registered policy. This allows governance
+/// bodies to enforce open-access tiers when the standard policy would otherwise restrict
+/// access (e.g., during emergency situations or regulatory mandates).
+///
+/// ## Override Semantics
+/// - When a governance override is active for a report class, access checks return
+///   `AccessCheckResult { allowed: true, reason: "governance override active", ... }`
+///   for all requesters, regardless of trust class, quality score, or provenance status.
+/// - Overrides do not modify the underlying policies — they are temporary and must
+///   be explicitly cleared via [`clear_governance_override`](Self::clear_governance_override).
+/// - Overrides take precedence over all other access controls.
+///
+/// ## Usage Example
+/// ```ignore
+/// let mut mgr = PublicInterestAccessManager::new();
+/// mgr.register_policy(/* restricted policy */);
+///
+/// // Governance decision to open access during emergency
+/// mgr.set_governance_override("weather.emergency");
+///
+/// // Now all requesters can access weather.emergency, regardless of policy
+/// let result = mgr.check_access("weather.emergency", &TrustClass::Untrusted, 0.0, false, &DataTier::Archive);
+/// assert!(result.allowed);
+///
+/// // Clear override when conditions change
+/// mgr.clear_governance_override("weather.emergency");
+/// ```
 pub struct PublicInterestAccessManager {
     policies: HashMap<String, PublicInterestAccessPolicy>,
     /// Default access tier for report classes without an explicit policy.
     default_tier: AccessTier,
+    /// Report classes where governance has mandated OpenAccess.
+    governance_overrides: HashMap<String, bool>,
 }
 
 impl PublicInterestAccessManager {
     /// Create a new manager with `RegisteredAccess` as the default tier and
-    /// no pre-registered policies.
+    /// no pre-registered policies or governance overrides.
     pub fn new() -> Self {
         Self {
             policies: HashMap::new(),
             default_tier: AccessTier::RegisteredAccess,
+            governance_overrides: HashMap::new(),
         }
     }
 
@@ -95,6 +129,12 @@ impl PublicInterestAccessManager {
     }
 
     /// Check whether a requester may read a report.
+    ///
+    /// # Governance Override
+    ///
+    /// If a governance override is active for `report_class`, access is immediately
+    /// granted with `allowed: true` and `reason: "governance override active"`,
+    /// bypassing all other checks.
     ///
     /// # Access-tier rules
     ///
@@ -121,6 +161,15 @@ impl PublicInterestAccessManager {
         has_provenance: bool,
         storage_tier: &DataTier,
     ) -> AccessCheckResult {
+        // --- Governance override (highest precedence) ---
+        if self.governance_overrides.contains_key(report_class) {
+            return AccessCheckResult {
+                allowed: true,
+                reason: "governance override active".to_string(),
+                effective_tier: AccessTier::OpenAccess,
+            };
+        }
+
         // Resolve the effective policy, or fall back to the default tier.
         let (effective_tier, policy_opt) = match self.policies.get(report_class) {
             Some(p) => (p.access_tier.clone(), Some(p)),
@@ -212,6 +261,56 @@ impl PublicInterestAccessManager {
     /// Return the number of registered policies.
     pub fn policy_count(&self) -> usize {
         self.policies.len()
+    }
+
+    // --- Governance Override Hooks ---
+
+    /// Set a governance override for `report_class`, granting `OpenAccess` to all requesters.
+    ///
+    /// This method records a governance decision to override the standard access policy
+    /// for the given report class, immediately granting `OpenAccess` to all users
+    /// (including unauthenticated readers). The override persists until explicitly
+    /// cleared with [`clear_governance_override`](Self::clear_governance_override).
+    ///
+    /// # Arguments
+    /// * `report_class` - The report class to override (e.g., "weather.emergency")
+    ///
+    /// # Notes
+    /// - Overrides take precedence over all registered policies.
+    /// - Overrides do not modify the underlying policy — they are temporary governance directives.
+    /// - Multiple overlapping overrides are allowed (e.g., both "weather" and "weather.emergency" can be overridden).
+    pub fn set_governance_override(&mut self, report_class: &str) {
+        self.governance_overrides.insert(report_class.to_string(), true);
+    }
+
+    /// Clear a governance override for `report_class`, reverting to the standard policy.
+    ///
+    /// This method removes a governance override, allowing the standard access policy
+    /// (or default tier) to govern access again. If no override exists for the given
+    /// report class, this method is a no-op and returns `false`.
+    ///
+    /// # Arguments
+    /// * `report_class` - The report class whose override should be cleared
+    ///
+    /// # Returns
+    /// `true` if an override was present and removed, `false` otherwise.
+    pub fn clear_governance_override(&mut self, report_class: &str) -> bool {
+        self.governance_overrides.remove(report_class).is_some()
+    }
+
+    /// Return a list of all report classes that have active governance overrides.
+    ///
+    /// # Returns
+    /// A vector of report class names sorted in alphabetical order.
+    pub fn list_governance_overrides(&self) -> Vec<String> {
+        let mut classes: Vec<String> = self.governance_overrides.keys().cloned().collect();
+        classes.sort();
+        classes
+    }
+
+    /// Check whether a governance override is active for the given report class.
+    pub fn has_governance_override(&self, report_class: &str) -> bool {
+        self.governance_overrides.contains_key(report_class)
     }
 }
 
@@ -661,5 +760,140 @@ mod tests {
         assert!(is_warm_enough(&DataTier::Warm, &DataTier::Warm));
         assert!(!is_warm_enough(&DataTier::Archive, &DataTier::Hot));
         assert!(!is_warm_enough(&DataTier::Cold, &DataTier::Warm));
+    }
+
+    // --- Governance Override Tests ---
+
+    #[test]
+    fn test_governance_override_grants_open_access() {
+        let mut mgr = PublicInterestAccessManager::new();
+        // Register a restricted policy
+        mgr.register_policy(internal_only_policy("weather.restricted"));
+
+        // Before override: Untrusted user is denied
+        let result_before = mgr.check_access(
+            "weather.restricted",
+            &TrustClass::Untrusted,
+            0.0,
+            false,
+            &DataTier::Archive,
+        );
+        assert!(!result_before.allowed);
+
+        // Set governance override
+        mgr.set_governance_override("weather.restricted");
+
+        // After override: Untrusted user is granted access
+        let result_after = mgr.check_access(
+            "weather.restricted",
+            &TrustClass::Untrusted,
+            0.0,
+            false,
+            &DataTier::Archive,
+        );
+        assert!(result_after.allowed);
+        assert_eq!(result_after.reason, "governance override active");
+        assert_eq!(result_after.effective_tier, AccessTier::OpenAccess);
+    }
+
+    #[test]
+    fn test_governance_override_supersedes_all_constraints() {
+        let mut mgr = PublicInterestAccessManager::new();
+        // Register a policy with high quality requirement and provenance requirement
+        let policy = PublicInterestAccessPolicy {
+            report_class: "weather.emergency".to_string(),
+            access_tier: AccessTier::InternalOnly,
+            min_quality_score: 0.9,
+            requires_provenance: true,
+            max_storage_tier: DataTier::Hot,
+        };
+        mgr.register_policy(policy);
+
+        // Set governance override
+        mgr.set_governance_override("weather.emergency");
+
+        // All constraints are bypassed: low quality, no provenance, cold tier, untrusted user
+        let result = mgr.check_access(
+            "weather.emergency",
+            &TrustClass::Untrusted,
+            0.0, // fails quality check
+            false, // fails provenance check
+            &DataTier::Cold, // fails tier check
+        );
+        assert!(result.allowed);
+        assert_eq!(result.reason, "governance override active");
+    }
+
+    #[test]
+    fn test_clear_governance_override() {
+        let mut mgr = PublicInterestAccessManager::new();
+        mgr.register_policy(internal_only_policy("weather.sensitive"));
+        mgr.set_governance_override("weather.sensitive");
+
+        assert!(mgr.has_governance_override("weather.sensitive"));
+        assert!(mgr.clear_governance_override("weather.sensitive"));
+        assert!(!mgr.has_governance_override("weather.sensitive"));
+
+        // After clearing, policy is enforced again
+        let result = mgr.check_access(
+            "weather.sensitive",
+            &TrustClass::Untrusted,
+            0.0,
+            false,
+            &DataTier::Archive,
+        );
+        assert!(!result.allowed);
+    }
+
+    #[test]
+    fn test_clear_nonexistent_governance_override() {
+        let mut mgr = PublicInterestAccessManager::new();
+        // Clearing a non-existent override returns false
+        assert!(!mgr.clear_governance_override("nonexistent"));
+    }
+
+    #[test]
+    fn test_list_governance_overrides() {
+        let mut mgr = PublicInterestAccessManager::new();
+        mgr.set_governance_override("weather.emergency");
+        mgr.set_governance_override("air_quality.critical");
+        mgr.set_governance_override("flood.warning");
+
+        let overrides = mgr.list_governance_overrides();
+        assert_eq!(overrides.len(), 3);
+        // Verify sorted order
+        assert_eq!(overrides[0], "air_quality.critical");
+        assert_eq!(overrides[1], "flood.warning");
+        assert_eq!(overrides[2], "weather.emergency");
+    }
+
+    #[test]
+    fn test_governance_override_is_temporary() {
+        let mut mgr = PublicInterestAccessManager::new();
+        mgr.register_policy(internal_only_policy("report.classified"));
+
+        // Override temporarily grants access
+        mgr.set_governance_override("report.classified");
+        let result1 = mgr.check_access(
+            "report.classified",
+            &TrustClass::Untrusted,
+            0.0,
+            false,
+            &DataTier::Archive,
+        );
+        assert!(result1.allowed);
+
+        // Clear override
+        mgr.clear_governance_override("report.classified");
+
+        // Access is revoked
+        let result2 = mgr.check_access(
+            "report.classified",
+            &TrustClass::Untrusted,
+            0.0,
+            false,
+            &DataTier::Archive,
+        );
+        assert!(!result2.allowed);
     }
 }
