@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use wrfcoin_storage_common::{
-    types::ContentId, hashing::sha256_digest, StorageError, StorageProvider,
+    types::ContentId, IntegrityVerifier, StorageError, StorageProvider,
 };
 
 /// Status of a cross-provider migration.
@@ -139,9 +139,8 @@ impl CrossProviderMigrator {
                 request.source_provider, e
             )))?;
 
-        // 2. Compute the digest of the original data for verification
-        let original_digest = sha256_digest(&data);
-        let original_digest_hex = hex::encode(original_digest);
+        // 2. Compute the blake3 hash of the original data for verification
+        let original_digest_hex = IntegrityVerifier::hash(&data);
 
         // 3. Store in destination provider
         let metadata = wrfcoin_storage_common::types::Metadata {
@@ -167,7 +166,7 @@ impl CrossProviderMigrator {
                 request.dest_provider, e
             )))?;
 
-        // 4. Verify by re-retrieving and comparing digests
+        // 4. Verify by re-retrieving and comparing hashes
         let migrated_data = dest
             .retrieve(&dest_cid)
             .await
@@ -176,8 +175,7 @@ impl CrossProviderMigrator {
                 e
             )))?;
 
-        let migrated_digest = sha256_digest(&migrated_data);
-        let migrated_digest_hex = hex::encode(migrated_digest);
+        let migrated_digest_hex = IntegrityVerifier::hash(&migrated_data);
 
         let verified = original_digest_hex == migrated_digest_hex;
 
@@ -507,5 +505,135 @@ mod tests {
         };
 
         assert_eq!(result1, result2);
+    }
+
+    /// Mock provider that corrupts data on retrieval to simulate verification failure.
+    struct CorruptingMockProvider {
+        data: Mutex<HashMap<String, Vec<u8>>>,
+        deleted_ids: Mutex<Vec<String>>,
+    }
+
+    impl CorruptingMockProvider {
+        fn new() -> Self {
+            Self {
+                data: Mutex::new(HashMap::new()),
+                deleted_ids: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn was_deleted(&self, hash: &str) -> bool {
+            self.deleted_ids
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|id| id == hash)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl StorageProvider for CorruptingMockProvider {
+        async fn store(
+            &self,
+            data: &[u8],
+            _metadata: &wrfcoin_storage_common::types::Metadata,
+        ) -> Result<ContentId, StorageError> {
+            let cid = wrfcoin_storage_common::ipfs_content_id(data);
+            self.data
+                .lock()
+                .unwrap()
+                .insert(cid.hash.clone(), data.to_vec());
+            Ok(cid)
+        }
+
+        async fn retrieve(&self, id: &ContentId) -> Result<Vec<u8>, StorageError> {
+            self.data
+                .lock()
+                .unwrap()
+                .get(&id.hash)
+                .map(|data| {
+                    // Corrupt the data by modifying the first byte
+                    let mut corrupted = data.clone();
+                    if !corrupted.is_empty() {
+                        corrupted[0] = corrupted[0].wrapping_add(1);
+                    }
+                    corrupted
+                })
+                .ok_or_else(|| StorageError::NotFound(id.hash.clone()))
+        }
+
+        async fn exists(&self, id: &ContentId) -> Result<bool, StorageError> {
+            Ok(self.data.lock().unwrap().contains_key(&id.hash))
+        }
+
+        async fn delete(&self, id: &ContentId) -> Result<(), StorageError> {
+            self.deleted_ids.lock().unwrap().push(id.hash.clone());
+            self.data.lock().unwrap().remove(&id.hash);
+            Ok(())
+        }
+
+        async fn health_check(
+            &self,
+        ) -> Result<wrfcoin_storage_common::types::HealthStatus, StorageError> {
+            Ok(wrfcoin_storage_common::types::HealthStatus {
+                healthy: true,
+                provider: "corrupting_mock".to_string(),
+                latency_ms: Some(1),
+                message: Some("corrupting_mock".to_string()),
+            })
+        }
+
+        async fn stats(
+            &self,
+        ) -> Result<wrfcoin_storage_common::types::StorageStats, StorageError> {
+            Ok(wrfcoin_storage_common::types::StorageStats {
+                total_stored: 0,
+                total_retrieved: 0,
+                total_bytes: 0,
+                cache_hits: 0,
+                cache_misses: 0,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_migration_rollback_on_verification_failure() {
+        let source = MockProvider::new();
+        let dest = CorruptingMockProvider::new();
+        let migrator = CrossProviderMigrator::new();
+
+        let test_data = b"critical weather data that must not be corrupted";
+        let cid = wrfcoin_storage_common::ipfs_content_id(test_data);
+
+        // Store test data in source
+        let metadata = wrfcoin_storage_common::types::Metadata {
+            content_type: "application/octet-stream".to_string(),
+            size: test_data.len() as u64,
+            timestamp: 0,
+            tags: HashMap::new(),
+        };
+        source.store(test_data, &metadata).await.unwrap();
+
+        // Create migration request
+        let request = CrossProviderMigrationRequest {
+            content_id: cid.clone(),
+            source_provider: "ipfs".to_string(),
+            dest_provider: "filecoin".to_string(),
+            delete_source: false,
+            max_retries: 3,
+        };
+
+        // Perform migration — should fail due to hash mismatch
+        let result = migrator
+            .migrate_content(&request, &source, &dest)
+            .await;
+
+        // Migration should fail
+        assert!(result.is_err(), "migration should fail due to verification failure");
+
+        // Verify the destination data was rolled back (deleted)
+        assert!(
+            dest.was_deleted(&cid.hash),
+            "destination data should be deleted on verification failure (rollback)"
+        );
     }
 }
