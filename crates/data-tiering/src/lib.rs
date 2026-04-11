@@ -30,12 +30,16 @@ pub use cross_provider_migration::{
     CrossProviderMigrationRequest, CrossProviderMigrationSummary, CrossProviderMigrator,
     MigrationJobStatus, VerificationResult,
 };
-pub use gc::{GarbageCollector, GcSummary};
+pub use gc::{
+    GarbageCollector, GcConfig, GcConfigError, GcDeletionRecord, GcKind, GcMarkedItem, GcMetrics,
+    GcReason, GcReport, GcSummary,
+};
 pub use metrics::{InMemoryMetrics, MetricsCollector};
 pub use orchestrator::{DataTieringOrchestrator, PublicInterestStoreResult};
 // ProvenancePolicy is now in wrfcoin-storage-common; re-export for backward compatibility.
-pub use wrfcoin_storage_common::provenance::ProvenancePolicy;
-pub use public_access::{AccessCheckResult, AccessTier, PublicInterestAccessManager, PublicInterestAccessPolicy};
+pub use public_access::{
+    AccessCheckResult, AccessTier, PublicInterestAccessManager, PublicInterestAccessPolicy,
+};
 pub use quality::{
     AccessControlPolicy, QualityRetentionManager, QualityRetentionPolicy, TrustClass,
 };
@@ -45,3 +49,4 @@ pub use remote_pinning::{
 pub use retention::RetentionManager;
 pub use s3_gateway::{BucketTierMapping, S3Gateway, S3GatewayError, S3Key};
 pub use tiers::TieringConfig;
+pub use wrfcoin_storage_common::provenance::ProvenancePolicy;
