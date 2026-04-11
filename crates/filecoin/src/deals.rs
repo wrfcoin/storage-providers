@@ -124,7 +124,10 @@ impl DealManager {
         };
 
         let vec_idx = self.deals.len();
-        self.data_index.entry(deal.data_cid.clone()).or_default().push(deal_id.clone());
+        self.data_index
+            .entry(deal.data_cid.clone())
+            .or_default()
+            .push(deal_id.clone());
         self.deals.push(deal);
         self.index.insert(deal_id.clone(), vec_idx);
         deal_id
@@ -159,7 +162,15 @@ impl DealManager {
 
     /// Returns all deal IDs associated with a given data CID (renewal history).
     pub fn get_deals_by_data_cid(&self, data_cid: &str) -> &[DealId] {
-        self.data_index.get(data_cid).map(|v| v.as_slice()).unwrap_or(&[])
+        self.data_index
+            .get(data_cid)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Returns all known deals for inspection or maintenance jobs.
+    pub fn iter(&self) -> std::slice::Iter<'_, StorageDeal> {
+        self.deals.iter()
     }
 
     /// Transition a deal from Proposed to Active, recording the current epoch.
@@ -167,7 +178,9 @@ impl DealManager {
     /// Returns `DealError::NotFound` if the deal doesn't exist.
     /// Returns `DealError::InvalidTransition` if the deal is not in `Proposed` state.
     pub fn activate_deal(&mut self, deal_id: &DealId, current_epoch: u64) -> Result<(), DealError> {
-        let &pos = self.index.get(deal_id.as_str())
+        let &pos = self
+            .index
+            .get(deal_id.as_str())
             .ok_or_else(|| DealError::NotFound(deal_id.clone()))?;
         let deal = &mut self.deals[pos];
         if deal.status != DealStatus::Proposed {
@@ -187,7 +200,9 @@ impl DealManager {
     /// Returns `DealError::InvalidTransition` if the deal is not `Active`.
     pub fn expire_deal(&mut self, deal_id: &DealId) -> Result<(), DealError> {
         {
-            let &pos = self.index.get(deal_id.as_str())
+            let &pos = self
+                .index
+                .get(deal_id.as_str())
                 .ok_or_else(|| DealError::NotFound(deal_id.clone()))?;
             if self.deals[pos].status != DealStatus::Active {
                 return Err(DealError::InvalidTransition {
@@ -206,7 +221,9 @@ impl DealManager {
     /// Returns `DealError::InvalidTransition` if the deal is not `Active`.
     pub fn slash_deal(&mut self, deal_id: &DealId) -> Result<(), DealError> {
         {
-            let &pos = self.index.get(deal_id.as_str())
+            let &pos = self
+                .index
+                .get(deal_id.as_str())
                 .ok_or_else(|| DealError::NotFound(deal_id.clone()))?;
             if self.deals[pos].status != DealStatus::Active {
                 return Err(DealError::InvalidTransition {
@@ -228,6 +245,16 @@ impl DealManager {
     /// Check the status of a deal by its ID.
     pub fn check_deal_status(&self, deal_id: &str) -> Option<&DealStatus> {
         self.get_deal(deal_id).map(|d| &d.status)
+    }
+
+    /// Override a deal status for maintenance or testing flows.
+    pub fn set_deal_status(&mut self, deal_id: &str, status: DealStatus) -> Result<(), DealError> {
+        let &pos = self
+            .index
+            .get(deal_id)
+            .ok_or_else(|| DealError::NotFound(deal_id.to_string()))?;
+        self.deals[pos].status = status;
+        Ok(())
     }
 
     /// Renew a deal by creating a new proposal with the same parameters.
@@ -315,7 +342,14 @@ mod tests {
     #[test]
     fn test_renew_deal() {
         let mut dm = DealManager::new();
-        let id = dm.propose_deal("miner".into(), "client".into(), "data".into(), 1024, 50, 1000);
+        let id = dm.propose_deal(
+            "miner".into(),
+            "client".into(),
+            "data".into(),
+            1024,
+            50,
+            1000,
+        );
         let new_id = dm.renew_deal(&id).unwrap();
         assert_eq!(new_id, "deal-2");
         assert_eq!(dm.list_deals().len(), 2);
@@ -473,7 +507,10 @@ mod tests {
         let err = dm.expire_deal(&id).unwrap_err();
         assert!(matches!(
             err,
-            DealError::InvalidTransition { from: DealStatus::Proposed, to: DealStatus::Expired }
+            DealError::InvalidTransition {
+                from: DealStatus::Proposed,
+                to: DealStatus::Expired
+            }
         ));
     }
 
