@@ -91,21 +91,26 @@ impl GarbageCollector {
     /// Execute a garbage collection sweep at the given timestamp.
     ///
     /// This function evaluates all indexed content against retention policies
-    /// and collects metadata about what would be deleted. In a full implementation,
-    /// this would also call provider.delete() for each expired item.
+    /// and deletes expired items from the specified storage tier.
     ///
     /// # Arguments
     ///
     /// * `current_time_secs` - Current Unix timestamp for age calculations
     /// * `tier_promotion_max_age_secs` - Max age for tier-promotion entries (default ~24h)
+    /// * `tier` - Storage tier to target for garbage collection
+    /// * `dry_run` - If true, evaluates but does not actually delete
+    /// * `provider` - Storage provider to call delete on
     ///
     /// # Returns
     ///
-    /// A [`GcSummary`] describing all cleanup actions that would be taken.
-    pub fn gc_sweep(
+    /// A [`GcSummary`] describing all cleanup actions that were (or would be) taken.
+    pub async fn gc_sweep(
         &self,
         current_time_secs: u64,
         tier_promotion_max_age_secs: u64,
+        tier: DataTier,
+        dry_run: bool,
+        provider: &dyn wrfcoin_storage_common::StorageProvider,
     ) -> GcSummary {
         let mut summary = GcSummary::default();
 
@@ -129,18 +134,29 @@ impl GarbageCollector {
                 // In a real implementation, this would come from metadata.
                 let artifact_class = format!("{:?}", domain).to_lowercase();
 
-                // Check retention for the default tier (Cold) — in a real implementation,
-                // we'd check all tiers where this content is stored.
+                // Check retention for the target tier.
                 let should_retain = self.retention_manager.should_retain(
                     &artifact_class,
-                    &DataTier::Cold,
+                    &tier,
                     age_secs,
                     0.5, // default quality score
                 );
 
                 if !should_retain {
                     summary.items_deleted += 1;
-                    // In a real implementation, we'd call provider.delete(&entry.content_id)
+
+                    // Call provider.delete() unless in dry_run mode
+                    if !dry_run {
+                        match provider.delete(&entry.content_id).await {
+                            Ok(()) => {
+                                // Delete succeeded
+                            }
+                            Err(_) => {
+                                // Record error but continue sweep
+                                summary.errors += 1;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -173,13 +189,24 @@ impl GarbageCollector {
     }
 
     /// Execute a garbage collection sweep using the current system time.
-    pub fn gc_sweep_now(&self) -> GcSummary {
+    /// Uses Cold tier and dry_run=false with a provided storage provider.
+    pub async fn gc_sweep_now(
+        &self,
+        provider: &dyn wrfcoin_storage_common::StorageProvider,
+    ) -> GcSummary {
         let current_time_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
 
-        self.gc_sweep(current_time_secs, 24 * 3600) // 24-hour default for tier promotions
+        self.gc_sweep(
+            current_time_secs,
+            24 * 3600,
+            DataTier::Cold,
+            false,
+            provider,
+        )
+        .await
     }
 }
 
@@ -187,6 +214,86 @@ impl GarbageCollector {
 mod tests {
     use super::*;
     use wrfcoin_storage_common::types::ContentId;
+    use std::sync::{Arc, Mutex};
+    use async_trait::async_trait;
+
+    /// Mock storage provider for testing.
+    struct MockProvider {
+        deleted_ids: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl MockProvider {
+        fn new() -> Self {
+            Self {
+                deleted_ids: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn deleted_count(&self) -> usize {
+            self.deleted_ids.lock().unwrap().len()
+        }
+
+        fn was_deleted(&self, content_id: &str) -> bool {
+            self.deleted_ids
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|id| id == content_id)
+        }
+    }
+
+    #[async_trait]
+    impl wrfcoin_storage_common::StorageProvider for MockProvider {
+        async fn store(
+            &self,
+            _data: &[u8],
+            _metadata: &wrfcoin_storage_common::types::Metadata,
+        ) -> Result<ContentId, wrfcoin_storage_common::StorageError> {
+            Ok(ContentId {
+                provider: "mock".to_string(),
+                hash: "mock_hash".to_string(),
+            })
+        }
+
+        async fn retrieve(&self, id: &ContentId) -> Result<Vec<u8>, wrfcoin_storage_common::StorageError> {
+            Ok(vec![1, 2, 3])
+        }
+
+        async fn exists(&self, _id: &ContentId) -> Result<bool, wrfcoin_storage_common::StorageError> {
+            Ok(true)
+        }
+
+        async fn delete(&self, id: &ContentId) -> Result<(), wrfcoin_storage_common::StorageError> {
+            self.deleted_ids
+                .lock()
+                .unwrap()
+                .push(format!("{}:{}", id.provider, id.hash));
+            Ok(())
+        }
+
+        async fn health_check(
+            &self,
+        ) -> Result<wrfcoin_storage_common::types::HealthStatus, wrfcoin_storage_common::StorageError> {
+            Ok(wrfcoin_storage_common::types::HealthStatus {
+                healthy: true,
+                provider: "mock".to_string(),
+                latency_ms: None,
+                message: None,
+            })
+        }
+
+        async fn stats(
+            &self,
+        ) -> Result<wrfcoin_storage_common::types::StorageStats, wrfcoin_storage_common::StorageError> {
+            Ok(wrfcoin_storage_common::types::StorageStats {
+                total_stored: 0,
+                total_retrieved: 0,
+                total_bytes: 0,
+                cache_hits: 0,
+                cache_misses: 0,
+            })
+        }
+    }
 
     fn create_test_gc() -> GarbageCollector {
         let mut retention = RetentionManager::new();
@@ -203,9 +310,10 @@ mod tests {
         GarbageCollector::new(retention)
     }
 
-    #[test]
-    fn test_gc_sweep_expired_content_marked_for_deletion() {
+    #[tokio::test]
+    async fn test_gc_sweep_expired_content_marked_for_deletion() {
         let mut gc = create_test_gc();
+        let provider = MockProvider::new();
 
         // Add content that is old enough to expire.
         let entry = wrfcoin_storage_common::IndexEntry {
@@ -221,7 +329,9 @@ mod tests {
         gc.add_content(entry);
 
         // Run GC at time 3000 (2000 seconds later, > 1000 second retention).
-        let summary = gc.gc_sweep(3000, 24 * 3600);
+        let summary = gc
+            .gc_sweep(3000, 24 * 3600, DataTier::Cold, false, &provider)
+            .await;
 
         assert_eq!(summary.items_evaluated, 1);
         assert_eq!(summary.items_deleted, 1, "expired content should be deleted");
@@ -229,11 +339,14 @@ mod tests {
             !summary.is_empty(),
             "summary should show cleanup was performed"
         );
+        // Verify provider.delete() was called
+        assert_eq!(provider.deleted_count(), 1, "provider.delete() should have been called");
     }
 
-    #[test]
-    fn test_gc_sweep_retains_non_expired_content() {
+    #[tokio::test]
+    async fn test_gc_sweep_retains_non_expired_content() {
         let mut gc = create_test_gc();
+        let provider = MockProvider::new();
 
         // Add content that is recent (not yet expired).
         let entry = wrfcoin_storage_common::IndexEntry {
@@ -249,15 +362,18 @@ mod tests {
         gc.add_content(entry);
 
         // Run GC at time 2500 (500 seconds later, < 1000 second retention).
-        let summary = gc.gc_sweep(2500, 24 * 3600);
+        let summary = gc
+            .gc_sweep(2500, 24 * 3600, DataTier::Cold, false, &provider)
+            .await;
 
         assert_eq!(summary.items_evaluated, 1);
         assert_eq!(summary.items_deleted, 0, "non-expired content should be retained");
     }
 
-    #[test]
-    fn test_gc_sweep_cleans_orphaned_quarantine_records() {
+    #[tokio::test]
+    async fn test_gc_sweep_cleans_orphaned_quarantine_records() {
         let mut gc = create_test_gc();
+        let provider = MockProvider::new();
 
         // Add an orphaned quarantine record (old).
         let record = QuarantineRecord {
@@ -270,49 +386,61 @@ mod tests {
         gc.add_quarantine("ipfs:Qm_orphan".to_string(), record);
 
         // Run GC at time 1_000_000 (more than 7 days later, > 7 * 86400 seconds).
-        let summary = gc.gc_sweep(1_000_000, 24 * 3600);
+        let summary = gc
+            .gc_sweep(1_000_000, 24 * 3600, DataTier::Cold, false, &provider)
+            .await;
 
         assert_eq!(summary.orphaned_quarantine_cleaned, 1);
     }
 
-    #[test]
-    fn test_gc_sweep_cleans_expired_filecoin_deals() {
+    #[tokio::test]
+    async fn test_gc_sweep_cleans_expired_filecoin_deals() {
         let mut gc = create_test_gc();
+        let provider = MockProvider::new();
 
         // Add an expired Filecoin deal.
         gc.add_filecoin_deal("deal-123".to_string(), 5000);
 
         // Run GC at time 6000 (after expiration).
-        let summary = gc.gc_sweep(6000, 24 * 3600);
+        let summary = gc
+            .gc_sweep(6000, 24 * 3600, DataTier::Cold, false, &provider)
+            .await;
 
         assert_eq!(summary.expired_filecoin_deals_cleaned, 1);
     }
 
-    #[test]
-    fn test_gc_sweep_cleans_stale_tier_promotions() {
+    #[tokio::test]
+    async fn test_gc_sweep_cleans_stale_tier_promotions() {
         let mut gc = create_test_gc();
+        let provider = MockProvider::new();
 
         // Add a tier promotion that is older than 24 hours.
         gc.add_tier_promotion("ipfs:Qm_old".to_string(), 1000);
 
         // Run GC at time 100_000 (much older than 24 hours).
-        let summary = gc.gc_sweep(100_000, 24 * 3600);
+        let summary = gc
+            .gc_sweep(100_000, 24 * 3600, DataTier::Cold, false, &provider)
+            .await;
 
         assert_eq!(summary.stale_tier_promotions_cleaned, 1);
     }
 
-    #[test]
-    fn test_gc_summary_is_empty_when_no_cleanup() {
+    #[tokio::test]
+    async fn test_gc_summary_is_empty_when_no_cleanup() {
         let gc = create_test_gc();
+        let provider = MockProvider::new();
 
-        let summary = gc.gc_sweep(2000, 24 * 3600);
+        let summary = gc
+            .gc_sweep(2000, 24 * 3600, DataTier::Cold, false, &provider)
+            .await;
 
         assert!(summary.is_empty(), "summary should be empty when no cleanup occurs");
     }
 
-    #[test]
-    fn test_gc_sweep_multiple_content_entries() {
+    #[tokio::test]
+    async fn test_gc_sweep_multiple_content_entries() {
         let mut gc = create_test_gc();
+        let provider = MockProvider::new();
 
         // Add multiple entries at different times.
         for i in 0..5 {
@@ -331,9 +459,88 @@ mod tests {
 
         // Run GC at time 3000.
         // Entries at: 1000, 1100, 1200, 1300, 1400 should all be deleted (all > 1000 secs old).
-        let summary = gc.gc_sweep(3000, 24 * 3600);
+        let summary = gc
+            .gc_sweep(3000, 24 * 3600, DataTier::Cold, false, &provider)
+            .await;
 
         assert_eq!(summary.items_evaluated, 5);
         assert_eq!(summary.items_deleted, 5);
+        // Verify all entries were deleted
+        assert_eq!(provider.deleted_count(), 5, "all expired entries should be deleted");
+    }
+
+    #[tokio::test]
+    async fn test_gc_sweep_dry_run_does_not_delete() {
+        let mut gc = create_test_gc();
+        let provider = MockProvider::new();
+
+        // Add content that is old enough to expire.
+        let entry = wrfcoin_storage_common::IndexEntry {
+            content_id: ContentId {
+                provider: "ipfs".to_string(),
+                hash: "Qm_expired".to_string(),
+            },
+            domain: EnvironmentalDomain::Weather,
+            station_id: "stn-1".to_string(),
+            report_id: "report-1".to_string(),
+            stored_at: 1000,
+        };
+        gc.add_content(entry);
+
+        // Run GC in dry_run mode at time 3000.
+        let summary = gc
+            .gc_sweep(3000, 24 * 3600, DataTier::Cold, true, &provider)
+            .await;
+
+        assert_eq!(summary.items_evaluated, 1);
+        assert_eq!(summary.items_deleted, 1, "dry_run should still count deletions");
+        // But provider.delete() should NOT have been called
+        assert_eq!(
+            provider.deleted_count(),
+            0,
+            "dry_run mode should not call provider.delete()"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_gc_sweep_tier_filtering() {
+        let mut retention = RetentionManager::new();
+
+        // Add separate policies for Cold and Hot tiers
+        let mut cold_policy = wrfcoin_storage_common::types::RetentionPolicy::new("weather", DataTier::Cold, 1);
+        cold_policy.max_age_secs = 1000;
+        retention.add_policy(cold_policy);
+
+        let mut hot_policy = wrfcoin_storage_common::types::RetentionPolicy::new("weather", DataTier::Hot, 1);
+        hot_policy.max_age_secs = 10000; // Much longer for Hot tier
+        retention.add_policy(hot_policy);
+
+        let mut gc = GarbageCollector::new(retention);
+        let provider = MockProvider::new();
+
+        // Add content that is 2000 seconds old
+        let entry = wrfcoin_storage_common::IndexEntry {
+            content_id: ContentId {
+                provider: "ipfs".to_string(),
+                hash: "Qm_content".to_string(),
+            },
+            domain: EnvironmentalDomain::Weather,
+            station_id: "stn-1".to_string(),
+            report_id: "report-1".to_string(),
+            stored_at: 1000,
+        };
+        gc.add_content(entry);
+
+        // Sweeping Cold tier should delete (2000 > 1000)
+        let cold_summary = gc
+            .gc_sweep(3000, 24 * 3600, DataTier::Cold, false, &provider)
+            .await;
+        assert_eq!(cold_summary.items_deleted, 1, "Cold tier should delete expired content");
+
+        // Sweeping Hot tier should NOT delete (2000 < 10000)
+        let hot_summary = gc
+            .gc_sweep(3000, 24 * 3600, DataTier::Hot, false, &provider)
+            .await;
+        assert_eq!(hot_summary.items_deleted, 0, "Hot tier should retain content");
     }
 }
