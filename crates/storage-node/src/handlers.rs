@@ -9,10 +9,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
-use wrfcoin_storage_common::{ContentId, Metadata, StorageStats};
+use wrfcoin_storage_common::{ContentId, Metadata, StorageStats, hashing::{ipfs_content_id, filecoin_content_id, sha256_digest}};
 
 use crate::error::ApiError;
 use crate::state::AppState;
+
+/// Maximum upload size: 256 MiB
+const MAX_UPLOAD_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Deserialize)]
 pub struct StoreRequest {
@@ -148,6 +151,13 @@ pub async fn store(
             format!("Invalid base64 encoding: {}", e),
         )))?;
 
+    // Enforce maximum upload size
+    if (data.len() as u64) > MAX_UPLOAD_BYTES {
+        return Err(ApiError(wrfcoin_storage_common::error::StorageError::InvalidData(
+            format!("Upload exceeds maximum size of {} bytes", MAX_UPLOAD_BYTES),
+        )));
+    }
+
     // Determine which provider to use
     let provider_name = req.provider.as_deref().unwrap_or(app_state.default_provider_name());
 
@@ -155,7 +165,7 @@ pub async fn store(
 
     // Create metadata
     let mut tags = req.tags.unwrap_or_default();
-    tags.insert("stored_via".to_string(), "storage-daemon".to_string());
+    tags.insert("stored_via".to_string(), "storage-node".to_string());
 
     let metadata = Metadata {
         content_type: req.content_type.clone(),
@@ -208,6 +218,9 @@ pub async fn retrieve(
     let provider = app_state.get_provider(provider_name)?;
 
     let data = provider.retrieve(&content_id).await?;
+
+    // Verify CID matches retrieved data
+    verify_content_id(&content_id, &data)?;
 
     tracing::info!(
         "Retrieved {} bytes for content ID: {}",
@@ -283,5 +296,36 @@ fn parse_content_id(id: &str) -> Result<ContentId, ApiError> {
         None => Err(ApiError(wrfcoin_storage_common::error::StorageError::InvalidData(
             "Content ID must be in format 'provider:hash'".to_string(),
         ))),
+    }
+}
+
+/// Verify that retrieved data matches the expected content ID
+fn verify_content_id(expected: &ContentId, data: &[u8]) -> Result<(), ApiError> {
+    let computed = match expected.provider.as_str() {
+        "ipfs" => ipfs_content_id(data),
+        "filecoin" => filecoin_content_id(data),
+        "arweave" => {
+            // For Arweave, verify using SHA-256 hex encoding
+            let digest = sha256_digest(data);
+            ContentId {
+                provider: "arweave".to_string(),
+                hash: format!("0x{}", hex::encode(digest)),
+            }
+        }
+        _ => {
+            // For unknown providers, we can't verify
+            return Ok(());
+        }
+    };
+
+    if computed.hash == expected.hash {
+        Ok(())
+    } else {
+        Err(ApiError(wrfcoin_storage_common::error::StorageError::InvalidData(
+            format!(
+                "CID mismatch: expected {}, computed {}",
+                expected.hash, computed.hash
+            ),
+        )))
     }
 }
