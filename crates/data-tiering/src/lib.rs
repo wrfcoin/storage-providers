@@ -4,6 +4,7 @@ pub mod archive_pipeline;
 pub mod budget;
 pub mod cost_estimator;
 pub mod cross_provider_migration;
+pub mod gc;
 pub mod metrics;
 pub mod migration;
 pub mod orchestrator;
@@ -29,6 +30,7 @@ pub use cross_provider_migration::{
     CrossProviderMigrationRequest, CrossProviderMigrationSummary, CrossProviderMigrator,
     MigrationJobStatus, VerificationResult,
 };
+pub use gc::{GarbageCollector, GcSummary};
 pub use metrics::{InMemoryMetrics, MetricsCollector};
 pub use orchestrator::{DataTieringOrchestrator, PublicInterestStoreResult};
 // ProvenancePolicy is now in wrfcoin-storage-common; re-export for backward compatibility.
