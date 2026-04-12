@@ -46,6 +46,10 @@ pub use quality::{
 pub use remote_pinning::{
     RemotePinServiceConfig, RemotePinStatus, RemotePinningClient, RemotePinningManager,
 };
-pub use retention::RetentionManager;
+pub mod retention_scheduler;
+pub use retention::{
+    ContentItem, EnforcementReport, RetentionManager, Violation, ViolationKind,
+};
+pub use retention_scheduler::{ContentSource, RetentionScheduler, RetentionSchedulerConfig};
 pub use s3_gateway::{BucketTierMapping, S3Gateway, S3GatewayError, S3Key};
 pub use tiers::TieringConfig;
