@@ -4,6 +4,7 @@ pub mod archive_pipeline;
 pub mod budget;
 pub mod cost_estimator;
 pub mod cross_provider_migration;
+pub mod dedup_registry;
 pub mod gc;
 pub mod metrics;
 pub mod migration;
@@ -29,6 +30,9 @@ pub use cost_estimator::{
 pub use cross_provider_migration::{
     CrossProviderMigrationRequest, CrossProviderMigrationSummary, CrossProviderMigrator,
     MigrationJobStatus, VerificationResult,
+};
+pub use dedup_registry::{
+    DedupError, DedupMetrics, PersistentDedupRegistry, ProviderReplica, RegistryEntry,
 };
 pub use gc::{GarbageCollector, GcSummary};
 pub use metrics::{InMemoryMetrics, MetricsCollector};
