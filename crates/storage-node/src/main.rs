@@ -125,6 +125,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/retrieve/:id", get(handlers::retrieve))
         .route("/api/delete/:id", delete(handlers::delete))
         .route("/api/exists/:id", get(handlers::exists))
+        // Cost estimator endpoints
+        .route("/api/cost/estimate", get(handlers::cost_estimate))
+        .route("/api/cost/cheapest", get(handlers::cost_cheapest))
+        // Storage analytics endpoints
+        .route("/api/analytics/snapshot", get(handlers::analytics_snapshot))
+        .route("/api/analytics/history", get(handlers::analytics_history))
         .with_state(app_state)
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive());
