@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
+use serde::Serialize;
 use wrfcoin_storage_common::StorageError;
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -21,7 +22,7 @@ const WINSTON_PER_AR: f64 = 1e12;
 // ── CostEstimate ───────────────────────────────────────────────────────────────
 
 /// A point-in-time cost estimate for storing `size_bytes` for `duration_secs`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CostEstimate {
     /// Provider name (e.g. `"ipfs"`, `"filecoin"`, `"arweave"`).
     pub provider: String,
