@@ -1,6 +1,73 @@
 //! Retention policy management for archived weather data.
 
+use std::time::SystemTime;
+
 use wrfcoin_storage_common::types::{DataTier, RetentionPolicy};
+
+/// A single content item to evaluate against retention policies.
+#[derive(Debug, Clone)]
+pub struct ContentItem {
+    /// Opaque identifier used to correlate violations back to the caller.
+    pub content_id: String,
+    /// Artifact class (e.g. "forecast", "weather.observation").
+    pub artifact_class: String,
+    /// Storage tier the item currently lives in.
+    pub tier: DataTier,
+    /// Age of the item in seconds.
+    pub age_secs: u64,
+    /// Quality score in [0.0, 1.0].
+    pub quality_score: f64,
+    /// Number of provider replicas currently holding this item.
+    pub replica_count: usize,
+}
+
+/// The kind of retention violation detected.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ViolationKind {
+    /// Item has exceeded its maximum age.
+    Expired { age_secs: u64, max_age_secs: u64 },
+    /// Item has fewer replicas than the policy minimum.
+    UnderReplicated { have: usize, need: usize },
+    /// Item quality is below the policy minimum.
+    BelowQuality { score: f64, min_score: f64 },
+}
+
+/// A single violation found during enforcement.
+#[derive(Debug, Clone)]
+pub struct Violation {
+    pub content_id: String,
+    pub artifact_class: String,
+    pub kind: ViolationKind,
+}
+
+/// Summary returned by [`RetentionManager::check_and_enforce`].
+#[derive(Debug, Clone)]
+pub struct EnforcementReport {
+    /// Wall-clock time when the check ran.
+    pub checked_at: SystemTime,
+    /// Number of items evaluated.
+    pub items_checked: usize,
+    /// All violations found.
+    pub violations: Vec<Violation>,
+}
+
+impl EnforcementReport {
+    /// Convenience: count of expired-item violations.
+    pub fn expired_count(&self) -> usize {
+        self.violations
+            .iter()
+            .filter(|v| matches!(v.kind, ViolationKind::Expired { .. }))
+            .count()
+    }
+
+    /// Convenience: count of under-replicated violations.
+    pub fn under_replicated_count(&self) -> usize {
+        self.violations
+            .iter()
+            .filter(|v| matches!(v.kind, ViolationKind::UnderReplicated { .. }))
+            .count()
+    }
+}
 
 /// Manages retention policies by artifact class and tier.
 pub struct RetentionManager {
@@ -117,6 +184,75 @@ impl RetentionManager {
             .map(|p| p.min_copies)
             .max()
             .unwrap_or(1)
+    }
+
+    /// Evaluate a batch of content items against all registered policies and
+    /// return a report of every violation found.
+    ///
+    /// This method is intentionally synchronous — it performs no I/O.
+    /// The caller (typically a [`RetentionScheduler`](crate::retention_scheduler::RetentionScheduler))
+    /// is responsible for supplying an up-to-date item snapshot and acting on
+    /// the returned violations (e.g. triggering deal renewals or deletions).
+    ///
+    /// Items with no matching policy are silently skipped (retain by default).
+    pub fn check_and_enforce(&self, items: &[ContentItem]) -> EnforcementReport {
+        let mut violations = Vec::new();
+
+        for item in items {
+            let matching: Vec<_> = self
+                .policies
+                .iter()
+                .filter(|p| p.artifact_class == item.artifact_class && p.tier == item.tier)
+                .collect();
+
+            if matching.is_empty() {
+                continue;
+            }
+
+            for policy in &matching {
+                // Expiry check
+                if policy.max_age_secs > 0 && item.age_secs > policy.max_age_secs {
+                    violations.push(Violation {
+                        content_id: item.content_id.clone(),
+                        artifact_class: item.artifact_class.clone(),
+                        kind: ViolationKind::Expired {
+                            age_secs: item.age_secs,
+                            max_age_secs: policy.max_age_secs,
+                        },
+                    });
+                }
+
+                // Replication check
+                if item.replica_count < policy.min_copies {
+                    violations.push(Violation {
+                        content_id: item.content_id.clone(),
+                        artifact_class: item.artifact_class.clone(),
+                        kind: ViolationKind::UnderReplicated {
+                            have: item.replica_count,
+                            need: policy.min_copies,
+                        },
+                    });
+                }
+
+                // Quality-floor check
+                if item.quality_score < policy.min_quality_score {
+                    violations.push(Violation {
+                        content_id: item.content_id.clone(),
+                        artifact_class: item.artifact_class.clone(),
+                        kind: ViolationKind::BelowQuality {
+                            score: item.quality_score,
+                            min_score: policy.min_quality_score,
+                        },
+                    });
+                }
+            }
+        }
+
+        EnforcementReport {
+            checked_at: SystemTime::now(),
+            items_checked: items.len(),
+            violations,
+        }
     }
 }
 
