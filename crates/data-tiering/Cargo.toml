@@ -16,7 +16,7 @@ blake3.workspace = true
 hex = "0.4"
 sled = "0.34"
 tempfile = "3"
+tokio = { workspace = true, features = ["time", "sync", "rt", "macros"] }
 
 [dev-dependencies]
-tokio.workspace = true
 wrfcoin-meteo-types.workspace = true
