@@ -221,27 +221,27 @@ impl CfMetadata {
 
         // Variables
         for (name, var) in &self.variables {
-            let prefix = format!("cf:var:{}", name);
-            tags.insert(format!("{}:standard_name", prefix), var.standard_name.clone());
-            tags.insert(format!("{}:units", prefix), var.units.clone());
+            let prefix = format!("cf:var:{name}");
+            tags.insert(format!("{prefix}:standard_name"), var.standard_name.clone());
+            tags.insert(format!("{prefix}:units"), var.units.clone());
 
             if let Some(ref ln) = var.long_name {
-                tags.insert(format!("{}:long_name", prefix), ln.clone());
+                tags.insert(format!("{prefix}:long_name"), ln.clone());
             }
             if let Some(ref cm) = var.cell_methods {
-                tags.insert(format!("{}:cell_methods", prefix), cm.clone());
+                tags.insert(format!("{prefix}:cell_methods"), cm.clone());
             }
             if !var.coordinates.is_empty() {
-                tags.insert(format!("{}:coordinates", prefix), var.coordinates.join(","));
+                tags.insert(format!("{prefix}:coordinates"), var.coordinates.join(","));
             }
             if let Some(vmin) = var.valid_min {
-                tags.insert(format!("{}:valid_min", prefix), vmin.to_string());
+                tags.insert(format!("{prefix}:valid_min"), vmin.to_string());
             }
             if let Some(vmax) = var.valid_max {
-                tags.insert(format!("{}:valid_max", prefix), vmax.to_string());
+                tags.insert(format!("{prefix}:valid_max"), vmax.to_string());
             }
             if let Some(mv) = var.missing_value {
-                tags.insert(format!("{}:missing_value", prefix), mv.to_string());
+                tags.insert(format!("{prefix}:missing_value"), mv.to_string());
             }
         }
 
@@ -496,10 +496,10 @@ mod tests {
         let tags = cf.to_tags();
 
         // Verify all variables' coordinates are in tags
-        assert!(tags.get("cf:var:temperature:coordinates").is_some());
-        assert!(tags.get("cf:var:relative_humidity:coordinates").is_some());
-        assert!(tags.get("cf:var:precipitation_flux:coordinates").is_some());
-        assert!(tags.get("cf:var:precipitation_flux:cell_methods").is_some());
+        assert!(tags.contains_key("cf:var:temperature:coordinates"));
+        assert!(tags.contains_key("cf:var:relative_humidity:coordinates"));
+        assert!(tags.contains_key("cf:var:precipitation_flux:coordinates"));
+        assert!(tags.contains_key("cf:var:precipitation_flux:cell_methods"));
     }
 
     #[test]
