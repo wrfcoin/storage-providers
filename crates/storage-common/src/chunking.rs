@@ -78,7 +78,7 @@ impl ChunkSizeHeuristics {
         // For large datasets (> 10 MB), use larger chunks
         if total_size_bytes > 10 * 1024 * 1024 {
             let size = total_size_bytes / 32; // Split into ~32 chunks
-            return std::cmp::min(Self::MAX_CHUNK_SIZE, std::cmp::max(size, Self::MIN_CHUNK_SIZE));
+            return size.clamp(Self::MIN_CHUNK_SIZE, Self::MAX_CHUNK_SIZE);
         }
 
         // For small datasets (< 1 MB), use smaller chunks
@@ -226,8 +226,7 @@ impl AdaptiveChunker {
             let actual_hash = IntegrityVerifier::hash(chunk);
             if actual_hash != *expected_hash {
                 return Err(format!(
-                    "chunk {} hash mismatch: expected {}, got {}",
-                    i, expected_hash, actual_hash
+                    "chunk {i} hash mismatch: expected {expected_hash}, got {actual_hash}"
                 ));
             }
         }

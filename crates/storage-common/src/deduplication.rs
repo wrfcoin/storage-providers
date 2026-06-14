@@ -109,7 +109,7 @@ impl DeduplicationRegistry {
         let mut entries = self
             .entries
             .write()
-            .map_err(|e| format!("failed to acquire write lock: {}", e))?;
+            .map_err(|e| format!("failed to acquire write lock: {e}"))?;
 
         let entry = entries
             .entry(canonical_hash.clone())
@@ -127,7 +127,7 @@ impl DeduplicationRegistry {
         let entries = self
             .entries
             .read()
-            .map_err(|e| format!("failed to acquire read lock: {}", e))?;
+            .map_err(|e| format!("failed to acquire read lock: {e}"))?;
 
         Ok(entries
             .get(canonical_hash)
@@ -139,7 +139,7 @@ impl DeduplicationRegistry {
         let entries = self
             .entries
             .read()
-            .map_err(|e| format!("failed to acquire read lock: {}", e))?;
+            .map_err(|e| format!("failed to acquire read lock: {e}"))?;
 
         Ok(entries.contains_key(canonical_hash))
     }
@@ -149,7 +149,7 @@ impl DeduplicationRegistry {
         let entries = self
             .entries
             .read()
-            .map_err(|e| format!("failed to acquire read lock: {}", e))?;
+            .map_err(|e| format!("failed to acquire read lock: {e}"))?;
 
         Ok(entries
             .get(canonical_hash)
@@ -162,13 +162,13 @@ impl DeduplicationRegistry {
         let mut entries = self
             .entries
             .write()
-            .map_err(|e| format!("failed to acquire write lock: {}", e))?;
+            .map_err(|e| format!("failed to acquire write lock: {e}"))?;
 
         if let Some(entry) = entries.get_mut(canonical_hash) {
             entry.increment_ref_count();
             Ok(entry.ref_count)
         } else {
-            Err(format!("canonical hash not found: {}", canonical_hash))
+            Err(format!("canonical hash not found: {canonical_hash}"))
         }
     }
 
@@ -177,12 +177,12 @@ impl DeduplicationRegistry {
         let mut entries = self
             .entries
             .write()
-            .map_err(|e| format!("failed to acquire write lock: {}", e))?;
+            .map_err(|e| format!("failed to acquire write lock: {e}"))?;
 
         if let Some(entry) = entries.get_mut(canonical_hash) {
             Ok(entry.decrement_ref_count())
         } else {
-            Err(format!("canonical hash not found: {}", canonical_hash))
+            Err(format!("canonical hash not found: {canonical_hash}"))
         }
     }
 
@@ -193,7 +193,7 @@ impl DeduplicationRegistry {
         let mut entries = self
             .entries
             .write()
-            .map_err(|e| format!("failed to acquire write lock: {}", e))?;
+            .map_err(|e| format!("failed to acquire write lock: {e}"))?;
 
         Ok(entries.remove(canonical_hash))
     }
@@ -203,7 +203,7 @@ impl DeduplicationRegistry {
         let entries = self
             .entries
             .read()
-            .map_err(|e| format!("failed to acquire read lock: {}", e))?;
+            .map_err(|e| format!("failed to acquire read lock: {e}"))?;
 
         Ok(entries.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
     }
@@ -213,7 +213,7 @@ impl DeduplicationRegistry {
         let mut entries = self
             .entries
             .write()
-            .map_err(|e| format!("failed to acquire write lock: {}", e))?;
+            .map_err(|e| format!("failed to acquire write lock: {e}"))?;
 
         *entries = snapshot.into_iter().collect();
         Ok(())
@@ -224,7 +224,7 @@ impl DeduplicationRegistry {
         let mut entries = self
             .entries
             .write()
-            .map_err(|e| format!("failed to acquire write lock: {}", e))?;
+            .map_err(|e| format!("failed to acquire write lock: {e}"))?;
 
         entries.clear();
         Ok(())
@@ -235,7 +235,7 @@ impl DeduplicationRegistry {
         let entries = self
             .entries
             .read()
-            .map_err(|e| format!("failed to acquire read lock: {}", e))?;
+            .map_err(|e| format!("failed to acquire read lock: {e}"))?;
 
         Ok(entries.len())
     }
@@ -245,7 +245,7 @@ impl DeduplicationRegistry {
         let entries = self
             .entries
             .read()
-            .map_err(|e| format!("failed to acquire read lock: {}", e))?;
+            .map_err(|e| format!("failed to acquire read lock: {e}"))?;
 
         Ok(entries.is_empty())
     }
@@ -382,7 +382,7 @@ mod tests {
     #[test]
     fn test_registry_exists() {
         let registry = DeduplicationRegistry::new();
-        assert!(registry.exists("nonexistent").unwrap() == false);
+        assert!(!registry.exists("nonexistent").unwrap());
 
         let cid = ContentId {
             provider: "ipfs".to_string(),

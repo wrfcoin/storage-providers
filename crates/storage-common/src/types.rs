@@ -505,7 +505,7 @@ mod tests {
             provider: "ipfs".to_string(),
             hash: "QmTest123".to_string(),
         };
-        assert_eq!(format!("{}", cid), "ipfs:QmTest123");
+        assert_eq!(format!("{cid}"), "ipfs:QmTest123");
     }
 
     #[test]
