@@ -7,7 +7,7 @@ repository.workspace = true
 description = "Arweave storage provider for permanent WRFCoin climate records"
 
 [dependencies]
-wrfcoin-storage-common = { path = "../storage-common" }
+wrfcoin-storage-common.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

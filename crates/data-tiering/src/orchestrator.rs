@@ -915,7 +915,9 @@ mod tests {
         use wrfcoin_storage_common::{
             EnvironmentalDomain, EnvironmentalReport, GeoLocation, ReportPayload, WeatherPayload,
         };
-        use wrfcoin_meteo_types::{ProvenanceChain as MeteoChain, ProvenanceEntry};
+        use wrfcoin_storage_common::meteo_compat::{
+            ProvenanceChain as MeteoChain, ProvenanceEntry,
+        };
 
         EnvironmentalReport {
             report_id: "env-001".to_string(),
