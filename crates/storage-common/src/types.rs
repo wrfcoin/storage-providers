@@ -2,13 +2,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 
-use wrfcoin_meteo_types as mt;
+use crate::meteo_compat as mt;
 
 // Re-export canonical environmental types from meteo-types.
 pub use mt::{EnvironmentalDomain, EnvironmentalReport, GeoLocation, ReportPayload};
 
 // Re-export quality types so callers (e.g. data-tiering) can make quality-aware routing
-// decisions without importing wrfcoin-meteo-types directly.
+// decisions without importing the compatibility module directly.
 pub use mt::{DataQualityBand, DataQualityScore, WeatherObservation};
 
 // Type aliases — keep existing names for all callers in this workspace.
