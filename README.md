@@ -44,7 +44,7 @@ The storage ecosystem is designed as a modular Rust workspace, ensuring type-saf
 ```bash
 git clone https://github.com/wrfcoin/storage-providers.git
 cd storage-providers
-cargo build
+./scripts/fresh-clone-build.sh
 ```
 
 ### Development & Testing
@@ -61,7 +61,11 @@ cargo test --workspace
 
 ## 🤝 Integration
 
-This repository depends on `meteo-types` for standardized environmental data structures. It is used by the `backend` services and the `native-chain` for off-chain data availability.
+The repository vendors a compatibility copy of the environmental types from
+`wrfcoin/meteo-types@b27a59fa8a1e8a7db589555ad697260f8a5ae36c`, so a fresh clone has no
+sibling-checkout dependency. This is a neutral build mechanism, not a decision that standalone
+`meteo-types` or Core4's fork is canonical; the oracle-lane decision will replace the compatibility
+module when that ownership question is resolved.
 
 ---
 

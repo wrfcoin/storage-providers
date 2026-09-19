@@ -7,7 +7,7 @@ repository.workspace = true
 description = "Hot/warm/cold data tiering orchestrator for WRFCoin storage"
 
 [dependencies]
-wrfcoin-storage-common = { path = "../storage-common" }
+wrfcoin-storage-common.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -17,6 +17,3 @@ hex = "0.4"
 sled = "0.34"
 tempfile = "3"
 tokio = { workspace = true, features = ["time", "sync", "rt", "macros"] }
-
-[dev-dependencies]
-wrfcoin-meteo-types.workspace = true

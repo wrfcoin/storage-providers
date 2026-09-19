@@ -8,6 +8,7 @@ pub mod failover;
 pub mod hashing;
 pub mod health;
 pub mod integrity;
+pub mod meteo_compat;
 pub mod provenance;
 pub mod traits;
 pub mod types;
