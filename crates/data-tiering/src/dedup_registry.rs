@@ -695,7 +695,7 @@ mod tests {
             let handle = std::thread::spawn(move || {
                 for j in 0..5 {
                     let hash = format!("hash_{}", i * 5 + j);
-                    let provider = format!("provider_{}", i);
+                    let provider = format!("provider_{i}");
                     let _ = reg.register(hash, provider, "loc".to_string(), 1024, 1000);
                 }
             });

@@ -156,7 +156,7 @@ mod tests {
     fn peer(id: &str, lat: f64, lon: f64) -> ClusterPeer {
         ClusterPeer {
             id: id.to_string(),
-            address: format!("/ip4/127.0.0.1/tcp/4001/p2p/{}", id),
+            address: format!("/ip4/127.0.0.1/tcp/4001/p2p/{id}"),
             latitude: lat,
             longitude: lon,
             capabilities: vec!["pin".to_string()],

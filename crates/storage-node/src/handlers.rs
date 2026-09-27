@@ -179,7 +179,7 @@ pub async fn store(
     let engine = base64::engine::general_purpose::STANDARD;
     let data = engine.decode(&req.data).map_err(|e| {
         ApiError(wrfcoin_storage_common::error::StorageError::InvalidData(
-            format!("Invalid base64 encoding: {}", e),
+            format!("Invalid base64 encoding: {e}"),
         ))
     })?;
 
@@ -187,8 +187,7 @@ pub async fn store(
     if (data.len() as u64) > MAX_UPLOAD_BYTES {
         return Err(ApiError(
             wrfcoin_storage_common::error::StorageError::InvalidData(format!(
-                "Upload exceeds maximum size of {} bytes",
-                MAX_UPLOAD_BYTES
+                "Upload exceeds maximum size of {MAX_UPLOAD_BYTES} bytes"
             )),
         ));
     }
@@ -558,11 +557,11 @@ pub async fn analytics_snapshot(
 
         let input = AnalyticsInput {
             providers: provider_inputs,
-            budget: &*budget,
+            budget: &budget,
             tiering_config: &app_state.tiering_config,
-            domain_index: &*domain_index,
+            domain_index: &domain_index,
             sla_statuses: &[],
-            failover: &*failover,
+            failover: &failover,
             tier_bytes: None,
             domain_bytes: None,
             timestamp: 0,

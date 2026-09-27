@@ -41,12 +41,12 @@ pub struct CanonicalError(pub String);
 pub fn canonical_json<T: Serialize>(value: &T) -> Result<Vec<u8>, CanonicalError> {
     // Serialize to an intermediate JSON value to apply sorting.
     let json_value = serde_json::to_value(value)
-        .map_err(|e| CanonicalError(format!("serialization failed: {}", e)))?;
+        .map_err(|e| CanonicalError(format!("serialization failed: {e}")))?;
 
     // Recursively sort keys and serialize to a compact string.
     let sorted_value = sort_json_keys(&json_value);
     let compact = serde_json::to_string(&sorted_value)
-        .map_err(|e| CanonicalError(format!("compact serialization failed: {}", e)))?;
+        .map_err(|e| CanonicalError(format!("compact serialization failed: {e}")))?;
 
     Ok(compact.into_bytes())
 }
@@ -96,8 +96,8 @@ mod tests {
         let m_idx = canonical_str.find("\"m\"").unwrap();
         let z_idx = canonical_str.find("\"z\"").unwrap();
 
-        assert!(a_idx < m_idx, "a should come before m in {}", canonical_str);
-        assert!(m_idx < z_idx, "m should come before z in {}", canonical_str);
+        assert!(a_idx < m_idx, "a should come before m in {canonical_str}");
+        assert!(m_idx < z_idx, "m should come before z in {canonical_str}");
     }
 
     #[test]
