@@ -59,7 +59,23 @@ cargo test -p wrfcoin-ipfs
 cargo test --workspace
 ```
 
-## 🤝 Integration
+## Validation
+
+Run `bash scripts/ci-local.selftest.sh` and `bash scripts/ci-local.sh` from the
+workspace root. The gate checks formatting, warnings, workspace tests and the
+fresh-clone build. Each step reports its exit status; success requires nonzero
+passed tests. Exit 1 means failure; exit 2 means VOID (missing Cargo or zero tests).
+The selftest exercises failing tests, missing Cargo, zero tests and a passing test.
+
+The workflow targets the approved `[self-hosted, n5pro]` labels (core4#3232).
+This repository currently has no CT102 runner: local invocation is the evidence
+for the 2026-09-27 build contract. When a CT102 runner is assigned, run these same
+commands there and record the head SHA, exit code and nonzero test count.
+Queued, skipped or zero-step jobs are not validation evidence. The dependent
+gate verifies that the build succeeded with executed steps; it cannot execute
+until a runner is available. No paid provider or hosted runner is needed.
+
+## Compatibility types
 
 The repository vendors a compatibility copy of the environmental types from
 `wrfcoin/meteo-types@b27a59fa8a1e8a7db589555ad697260f8a5ae36c`, so a fresh clone has no
