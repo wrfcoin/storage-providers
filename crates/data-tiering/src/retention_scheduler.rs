@@ -187,7 +187,10 @@ async fn run_loop(
 fn log_report(report: &EnforcementReport) {
     for v in &report.violations {
         match &v.kind {
-            crate::retention::ViolationKind::Expired { age_secs, max_age_secs } => {
+            crate::retention::ViolationKind::Expired {
+                age_secs,
+                max_age_secs,
+            } => {
                 eprintln!(
                     "[RetentionScheduler] EXPIRED  {} ({}) age={}s max={}s",
                     v.content_id, v.artifact_class, age_secs, max_age_secs
@@ -257,7 +260,7 @@ mod tests {
             content_id: "cid-1".into(),
             artifact_class: "forecast".into(),
             tier: DataTier::Archive,
-            age_secs: 7200,   // 2 hours
+            age_secs: 7200, // 2 hours
             quality_score: 0.9,
             replica_count: 2,
         }
@@ -316,7 +319,7 @@ mod tests {
             content_id: "cid-3".into(),
             artifact_class: "forecast".into(),
             tier: DataTier::Archive,
-            age_secs: 600,    // 10 min — within 1h max
+            age_secs: 600, // 10 min — within 1h max
             quality_score: 0.9,
             replica_count: 3,
         };

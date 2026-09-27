@@ -38,18 +38,18 @@ pub use gc::{GarbageCollector, GcSummary};
 pub use metrics::{InMemoryMetrics, MetricsCollector};
 pub use orchestrator::{DataTieringOrchestrator, PublicInterestStoreResult};
 // ProvenancePolicy is now in wrfcoin-storage-common; re-export for backward compatibility.
-pub use wrfcoin_storage_common::provenance::ProvenancePolicy;
-pub use public_access::{AccessCheckResult, AccessTier, PublicInterestAccessManager, PublicInterestAccessPolicy};
+pub use public_access::{
+    AccessCheckResult, AccessTier, PublicInterestAccessManager, PublicInterestAccessPolicy,
+};
 pub use quality::{
     AccessControlPolicy, QualityRetentionManager, QualityRetentionPolicy, TrustClass,
 };
 pub use remote_pinning::{
     RemotePinServiceConfig, RemotePinStatus, RemotePinningClient, RemotePinningManager,
 };
+pub use wrfcoin_storage_common::provenance::ProvenancePolicy;
 pub mod retention_scheduler;
-pub use retention::{
-    ContentItem, EnforcementReport, RetentionManager, Violation, ViolationKind,
-};
+pub use retention::{ContentItem, EnforcementReport, RetentionManager, Violation, ViolationKind};
 pub use retention_scheduler::{ContentSource, RetentionScheduler, RetentionSchedulerConfig};
 pub use s3_gateway::{BucketTierMapping, S3Gateway, S3GatewayError, S3Key};
 pub use tiers::TieringConfig;

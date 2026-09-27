@@ -151,10 +151,7 @@ async fn test_cid_computation_correctness() {
         .await
         .expect("archival should succeed");
 
-    assert_ne!(
-        cid1, cid3,
-        "different receipts must produce different CIDs"
-    );
+    assert_ne!(cid1, cid3, "different receipts must produce different CIDs");
 }
 
 /// Test 3: Round-trip archive and retrieve
@@ -218,7 +215,7 @@ async fn test_different_manifests_produce_different_cids() {
     );
 
     let receipt2 = ForecastVerificationReceipt::new(
-        "c".repeat(64),  // Different manifest digest
+        "c".repeat(64), // Different manifest digest
         "commit-001".to_string(),
         "b".repeat(64),
         ForecastAccuracyMetrics {

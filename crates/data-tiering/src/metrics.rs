@@ -113,10 +113,7 @@ mod tests {
         m.record_retrieval("ipfs", true, 42);
         assert_eq!(m.retrieval_attempts.load(Ordering::Relaxed), 1);
         assert_eq!(m.retrieval_successes.load(Ordering::Relaxed), 1);
-        assert_eq!(
-            m.total_retrieval_latency_ms.load(Ordering::Relaxed),
-            42
-        );
+        assert_eq!(m.total_retrieval_latency_ms.load(Ordering::Relaxed), 42);
     }
 
     #[test]

@@ -201,10 +201,22 @@ impl CfMetadata {
         let mut tags = HashMap::new();
 
         // Global attributes
-        tags.insert("cf:global:title".to_string(), self.global_attributes.title.clone());
-        tags.insert("cf:global:source".to_string(), self.global_attributes.source.clone());
-        tags.insert("cf:global:history".to_string(), self.global_attributes.history.clone());
-        tags.insert("cf:global:conventions".to_string(), self.global_attributes.conventions.clone());
+        tags.insert(
+            "cf:global:title".to_string(),
+            self.global_attributes.title.clone(),
+        );
+        tags.insert(
+            "cf:global:source".to_string(),
+            self.global_attributes.source.clone(),
+        );
+        tags.insert(
+            "cf:global:history".to_string(),
+            self.global_attributes.history.clone(),
+        );
+        tags.insert(
+            "cf:global:conventions".to_string(),
+            self.global_attributes.conventions.clone(),
+        );
 
         if let Some(ref refs) = self.global_attributes.references {
             tags.insert("cf:global:references".to_string(), refs.clone());
@@ -264,7 +276,11 @@ impl CfRegistry {
             "K".to_string(),
         )
         .with_long_name("Air temperature at 2m height".to_string())
-        .with_coordinates(vec!["time".to_string(), "latitude".to_string(), "longitude".to_string()])
+        .with_coordinates(vec![
+            "time".to_string(),
+            "latitude".to_string(),
+            "longitude".to_string(),
+        ])
         .with_valid_min(200.0)
         .with_valid_max(330.0)
     }
@@ -277,7 +293,11 @@ impl CfRegistry {
             "%".to_string(),
         )
         .with_long_name("Relative humidity at 2m height".to_string())
-        .with_coordinates(vec!["time".to_string(), "latitude".to_string(), "longitude".to_string()])
+        .with_coordinates(vec![
+            "time".to_string(),
+            "latitude".to_string(),
+            "longitude".to_string(),
+        ])
         .with_valid_min(0.0)
         .with_valid_max(100.0)
     }
@@ -291,7 +311,11 @@ impl CfRegistry {
         )
         .with_long_name("Daily accumulated precipitation".to_string())
         .with_cell_methods("time: sum".to_string())
-        .with_coordinates(vec!["time".to_string(), "latitude".to_string(), "longitude".to_string()])
+        .with_coordinates(vec![
+            "time".to_string(),
+            "latitude".to_string(),
+            "longitude".to_string(),
+        ])
         .with_valid_min(0.0)
     }
 
@@ -303,7 +327,11 @@ impl CfRegistry {
             "m s-1".to_string(),
         )
         .with_long_name("Wind speed at 10m height".to_string())
-        .with_coordinates(vec!["time".to_string(), "latitude".to_string(), "longitude".to_string()])
+        .with_coordinates(vec![
+            "time".to_string(),
+            "latitude".to_string(),
+            "longitude".to_string(),
+        ])
         .with_valid_min(0.0)
     }
 
@@ -315,7 +343,11 @@ impl CfRegistry {
             "Pa".to_string(),
         )
         .with_long_name("Surface air pressure".to_string())
-        .with_coordinates(vec!["time".to_string(), "latitude".to_string(), "longitude".to_string()])
+        .with_coordinates(vec![
+            "time".to_string(),
+            "latitude".to_string(),
+            "longitude".to_string(),
+        ])
         .with_valid_min(80000.0)
         .with_valid_max(115000.0)
     }
@@ -329,7 +361,11 @@ impl CfRegistry {
         )
         .with_long_name("Downwelling solar radiation at surface".to_string())
         .with_cell_methods("time: mean".to_string())
-        .with_coordinates(vec!["time".to_string(), "latitude".to_string(), "longitude".to_string()])
+        .with_coordinates(vec![
+            "time".to_string(),
+            "latitude".to_string(),
+            "longitude".to_string(),
+        ])
         .with_valid_min(0.0)
         .with_valid_max(1500.0)
     }
@@ -342,7 +378,12 @@ impl CfRegistry {
             "m3 m-3".to_string(),
         )
         .with_long_name("Soil volumetric water content".to_string())
-        .with_coordinates(vec!["time".to_string(), "depth".to_string(), "latitude".to_string(), "longitude".to_string()])
+        .with_coordinates(vec![
+            "time".to_string(),
+            "depth".to_string(),
+            "latitude".to_string(),
+            "longitude".to_string(),
+        ])
         .with_valid_min(0.0)
         .with_valid_max(1.0)
     }
@@ -355,7 +396,11 @@ impl CfRegistry {
             "µg m-3".to_string(),
         )
         .with_long_name("PM2.5 mass concentration".to_string())
-        .with_coordinates(vec!["time".to_string(), "latitude".to_string(), "longitude".to_string()])
+        .with_coordinates(vec![
+            "time".to_string(),
+            "latitude".to_string(),
+            "longitude".to_string(),
+        ])
         .with_valid_min(0.0)
     }
 }
@@ -424,7 +469,10 @@ mod tests {
 
         let tags = cf.to_tags();
         assert!(tags.contains_key("cf:global:title"));
-        assert_eq!(tags.get("cf:global:title"), Some(&"Test Dataset".to_string()));
+        assert_eq!(
+            tags.get("cf:global:title"),
+            Some(&"Test Dataset".to_string())
+        );
         assert!(tags.contains_key("cf:global:institution"));
         assert!(tags.contains_key("cf:var:temperature:standard_name"));
         assert_eq!(tags.get("cf:var:temperature:units"), Some(&"K".to_string()));
@@ -467,12 +515,21 @@ mod tests {
         // Verify all standard variables are correctly configured
         assert_eq!(temp.standard_name, "air_temperature");
         assert_eq!(humidity.standard_name, "relative_humidity");
-        assert_eq!(precip.standard_name, "lwe_thickness_of_precipitation_amount");
+        assert_eq!(
+            precip.standard_name,
+            "lwe_thickness_of_precipitation_amount"
+        );
         assert_eq!(wind.standard_name, "wind_speed");
         assert_eq!(pressure.standard_name, "surface_air_pressure");
-        assert_eq!(radiation.standard_name, "surface_downwelling_shortwave_flux_in_air");
+        assert_eq!(
+            radiation.standard_name,
+            "surface_downwelling_shortwave_flux_in_air"
+        );
         assert_eq!(soil.standard_name, "soil_moisture_content");
-        assert_eq!(pm25.standard_name, "mass_concentration_of_pm2p5_aerosol_in_air");
+        assert_eq!(
+            pm25.standard_name,
+            "mass_concentration_of_pm2p5_aerosol_in_air"
+        );
 
         // All should have coordinates and valid constraints
         assert!(!temp.coordinates.is_empty());

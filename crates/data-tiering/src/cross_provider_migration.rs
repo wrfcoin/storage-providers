@@ -4,9 +4,7 @@
 //! with automatic CID verification after transfer to ensure data integrity.
 
 use serde::{Deserialize, Serialize};
-use wrfcoin_storage_common::{
-    types::ContentId, IntegrityVerifier, StorageError, StorageProvider,
-};
+use wrfcoin_storage_common::{types::ContentId, IntegrityVerifier, StorageError, StorageProvider};
 
 /// Status of a cross-provider migration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,7 +78,11 @@ pub struct CrossProviderMigrator {
     /// Pending migration requests.
     pending_requests: Vec<CrossProviderMigrationRequest>,
     /// Migration history (for debugging and audit).
-    history: Vec<(CrossProviderMigrationRequest, MigrationJobStatus, Option<String>)>,
+    history: Vec<(
+        CrossProviderMigrationRequest,
+        MigrationJobStatus,
+        Option<String>,
+    )>,
 }
 
 impl CrossProviderMigrator {
@@ -131,13 +133,12 @@ impl CrossProviderMigrator {
         dest: &dyn StorageProvider,
     ) -> Result<VerificationResult, StorageError> {
         // 1. Retrieve content from source provider
-        let data = source
-            .retrieve(&request.content_id)
-            .await
-            .map_err(|e| StorageError::ProviderError(format!(
+        let data = source.retrieve(&request.content_id).await.map_err(|e| {
+            StorageError::ProviderError(format!(
                 "failed to retrieve from {}: {:?}",
                 request.source_provider, e
-            )))?;
+            ))
+        })?;
 
         // 2. Compute the blake3 hash of the original data for verification
         let original_digest_hex = IntegrityVerifier::hash(&data);
@@ -153,27 +154,28 @@ impl CrossProviderMigrator {
             tags: {
                 let mut tags = std::collections::HashMap::new();
                 tags.insert("migrated_from".to_string(), request.source_provider.clone());
-                tags.insert("migration_source_cid".to_string(), request.content_id.hash.clone());
+                tags.insert(
+                    "migration_source_cid".to_string(),
+                    request.content_id.hash.clone(),
+                );
                 tags
             },
         };
 
-        let dest_cid = dest
-            .store(&data, &metadata)
-            .await
-            .map_err(|e| StorageError::ProviderError(format!(
+        let dest_cid = dest.store(&data, &metadata).await.map_err(|e| {
+            StorageError::ProviderError(format!(
                 "failed to store to {}: {:?}",
                 request.dest_provider, e
-            )))?;
+            ))
+        })?;
 
         // 4. Verify by re-retrieving and comparing hashes
-        let migrated_data = dest
-            .retrieve(&dest_cid)
-            .await
-            .map_err(|e| StorageError::ProviderError(format!(
+        let migrated_data = dest.retrieve(&dest_cid).await.map_err(|e| {
+            StorageError::ProviderError(format!(
                 "verification: failed to retrieve from destination: {:?}",
                 e
-            )))?;
+            ))
+        })?;
 
         let migrated_digest_hex = IntegrityVerifier::hash(&migrated_data);
 
@@ -182,12 +184,10 @@ impl CrossProviderMigrator {
         // 5. If verification failed, optionally delete from destination
         if !verified {
             let _ = dest.delete(&dest_cid).await;
-            return Err(StorageError::InvalidData(
-                format!(
-                    "CID verification failed: {} != {}",
-                    original_digest_hex, migrated_digest_hex
-                )
-            ));
+            return Err(StorageError::InvalidData(format!(
+                "CID verification failed: {} != {}",
+                original_digest_hex, migrated_digest_hex
+            )));
         }
 
         // 6. If source deletion is requested and verification passed, delete from source
@@ -223,11 +223,8 @@ impl CrossProviderMigrator {
             match self.migrate_content(&request, source, dest).await {
                 Ok(_result) => {
                     summary.successful += 1;
-                    self.history.push((
-                        request,
-                        MigrationJobStatus::Completed,
-                        None,
-                    ));
+                    self.history
+                        .push((request, MigrationJobStatus::Completed, None));
                 }
                 Err(e) => {
                     summary.failed += 1;
@@ -245,7 +242,13 @@ impl CrossProviderMigrator {
     }
 
     /// Get the migration history.
-    pub fn history(&self) -> &[(CrossProviderMigrationRequest, MigrationJobStatus, Option<String>)] {
+    pub fn history(
+        &self,
+    ) -> &[(
+        CrossProviderMigrationRequest,
+        MigrationJobStatus,
+        Option<String>,
+    )] {
         &self.history
     }
 
@@ -324,9 +327,7 @@ mod tests {
             })
         }
 
-        async fn stats(
-            &self,
-        ) -> Result<wrfcoin_storage_common::types::StorageStats, StorageError> {
+        async fn stats(&self) -> Result<wrfcoin_storage_common::types::StorageStats, StorageError> {
             Ok(wrfcoin_storage_common::types::StorageStats {
                 total_stored: 0,
                 total_retrieved: 0,
@@ -522,11 +523,7 @@ mod tests {
         }
 
         fn was_deleted(&self, hash: &str) -> bool {
-            self.deleted_ids
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|id| id == hash)
+            self.deleted_ids.lock().unwrap().iter().any(|id| id == hash)
         }
     }
 
@@ -582,9 +579,7 @@ mod tests {
             })
         }
 
-        async fn stats(
-            &self,
-        ) -> Result<wrfcoin_storage_common::types::StorageStats, StorageError> {
+        async fn stats(&self) -> Result<wrfcoin_storage_common::types::StorageStats, StorageError> {
             Ok(wrfcoin_storage_common::types::StorageStats {
                 total_stored: 0,
                 total_retrieved: 0,
@@ -623,12 +618,13 @@ mod tests {
         };
 
         // Perform migration — should fail due to hash mismatch
-        let result = migrator
-            .migrate_content(&request, &source, &dest)
-            .await;
+        let result = migrator.migrate_content(&request, &source, &dest).await;
 
         // Migration should fail
-        assert!(result.is_err(), "migration should fail due to verification failure");
+        assert!(
+            result.is_err(),
+            "migration should fail due to verification failure"
+        );
 
         // Verify the destination data was rolled back (deleted)
         assert!(

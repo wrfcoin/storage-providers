@@ -71,10 +71,7 @@ impl HealthAggregator {
     }
 
     /// Check a single provider by name.
-    pub async fn check_provider(
-        &self,
-        name: &str,
-    ) -> Option<Result<HealthStatus, StorageError>> {
+    pub async fn check_provider(&self, name: &str) -> Option<Result<HealthStatus, StorageError>> {
         for (n, provider) in &self.providers {
             if n == name {
                 return Some(provider.health_check().await);

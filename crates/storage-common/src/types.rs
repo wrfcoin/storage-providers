@@ -108,9 +108,7 @@ impl StorageMetadata {
     /// The quality band and score are populated from `report.quality_score` if present.
     pub fn from_report(report: &EnvironmentalReport) -> Self {
         let quality_score_val = report.quality_score;
-        let quality_score = quality_score_val.and_then(|s| {
-            DataQualityScore::new(s, s, s).ok()
-        });
+        let quality_score = quality_score_val.and_then(|s| DataQualityScore::new(s, s, s).ok());
         let quality_band = quality_score_val.map(DataQualityBand::from_score);
 
         let mut tags = HashMap::new();
@@ -310,7 +308,9 @@ impl PayloadBoundsValidate for SoilPayload {
         }
         if let Some(v) = self.organic_carbon_pct {
             if !(0.0..=100.0).contains(&v) {
-                return Err(format!("organic_carbon_pct {v} is out of range [0.0, 100.0]"));
+                return Err(format!(
+                    "organic_carbon_pct {v} is out of range [0.0, 100.0]"
+                ));
             }
         }
         if let Some(v) = self.depth_cm {
@@ -351,7 +351,9 @@ impl PayloadBoundsValidate for OceanPayload {
         }
         if let Some(v) = self.current_direction_deg {
             if v > 360.0 {
-                return Err(format!("current_direction_deg {v} is out of range [0, 360]"));
+                return Err(format!(
+                    "current_direction_deg {v} is out of range [0, 360]"
+                ));
             }
         }
         if let Some(v) = self.wave_height_m {
@@ -510,9 +512,18 @@ mod tests {
 
     #[test]
     fn test_content_id_equality() {
-        let a = ContentId { provider: "ipfs".to_string(), hash: "abc".to_string() };
-        let b = ContentId { provider: "ipfs".to_string(), hash: "abc".to_string() };
-        let c = ContentId { provider: "ipfs".to_string(), hash: "def".to_string() };
+        let a = ContentId {
+            provider: "ipfs".to_string(),
+            hash: "abc".to_string(),
+        };
+        let b = ContentId {
+            provider: "ipfs".to_string(),
+            hash: "abc".to_string(),
+        };
+        let c = ContentId {
+            provider: "ipfs".to_string(),
+            hash: "def".to_string(),
+        };
         assert_eq!(a, b);
         assert_ne!(a, c);
     }
@@ -534,7 +545,10 @@ mod tests {
     #[test]
     fn test_storage_receipt() {
         let receipt = StorageReceipt {
-            content_id: ContentId { provider: "ipfs".to_string(), hash: "Qm123".to_string() },
+            content_id: ContentId {
+                provider: "ipfs".to_string(),
+                hash: "Qm123".to_string(),
+            },
             provider: "ipfs".to_string(),
             timestamp: 1000,
             size: 512,
@@ -567,7 +581,12 @@ mod tests {
 
     #[test]
     fn test_data_tier_variants() {
-        let tiers = [DataTier::Hot, DataTier::Warm, DataTier::Cold, DataTier::Archive];
+        let tiers = [
+            DataTier::Hot,
+            DataTier::Warm,
+            DataTier::Cold,
+            DataTier::Archive,
+        ];
         assert_eq!(tiers.len(), 4);
         assert_ne!(DataTier::Hot, DataTier::Cold);
     }
@@ -701,7 +720,11 @@ mod tests {
             report_id: "aq-001".to_string(),
             domain: EnvironmentalDomain::AirQuality,
             station_id: "aq-stn-1".to_string(),
-            location: GeoLocation { latitude: 34.0, longitude: -118.0, altitude_m: None },
+            location: GeoLocation {
+                latitude: 34.0,
+                longitude: -118.0,
+                altitude_m: None,
+            },
             observed_at: 2_000_000,
             submitted_at: 2_000_001,
             payload: ReportPayload::AirQuality(AirQualityPayload {
@@ -728,7 +751,11 @@ mod tests {
             report_id: "wq-001".to_string(),
             domain: EnvironmentalDomain::WaterQuality,
             station_id: "wq-stn-1".to_string(),
-            location: GeoLocation { latitude: 47.0, longitude: -122.0, altitude_m: None },
+            location: GeoLocation {
+                latitude: 47.0,
+                longitude: -122.0,
+                altitude_m: None,
+            },
             observed_at: 3_000_000,
             submitted_at: 3_000_001,
             payload: ReportPayload::WaterQuality(WaterQualityPayload {
@@ -751,7 +778,11 @@ mod tests {
             report_id: "wf-001".to_string(),
             domain: EnvironmentalDomain::Wildfire,
             station_id: "sat-modis-1".to_string(),
-            location: GeoLocation { latitude: 38.5, longitude: -120.5, altitude_m: None },
+            location: GeoLocation {
+                latitude: 38.5,
+                longitude: -120.5,
+                altitude_m: None,
+            },
             observed_at: 4_000_000,
             submitted_at: 4_000_001,
             payload: ReportPayload::Wildfire(WildfirePayload {
@@ -774,7 +805,11 @@ mod tests {
             report_id: "mismatch-001".to_string(),
             domain: EnvironmentalDomain::Wildfire,
             station_id: "stn-1".to_string(),
-            location: GeoLocation { latitude: 0.0, longitude: 0.0, altitude_m: None },
+            location: GeoLocation {
+                latitude: 0.0,
+                longitude: 0.0,
+                altitude_m: None,
+            },
             observed_at: 1,
             submitted_at: 2,
             // Wildfire domain but Weather payload — should fail validation
@@ -796,7 +831,11 @@ mod tests {
             report_id: "soil-001".to_string(),
             domain: EnvironmentalDomain::Soil,
             station_id: "soil-stn-1".to_string(),
-            location: GeoLocation { latitude: 45.0, longitude: -93.0, altitude_m: Some(300.0) },
+            location: GeoLocation {
+                latitude: 45.0,
+                longitude: -93.0,
+                altitude_m: Some(300.0),
+            },
             observed_at: 5_000_000,
             submitted_at: 5_000_001,
             payload: ReportPayload::Soil(SoilPayload {
@@ -833,7 +872,8 @@ mod tests {
     fn test_soil_report_serde_roundtrip() {
         let report = sample_soil_report();
         let json = serde_json::to_string(&report).expect("serialize soil report");
-        let decoded: EnvironmentalReport = serde_json::from_str(&json).expect("deserialize soil report");
+        let decoded: EnvironmentalReport =
+            serde_json::from_str(&json).expect("deserialize soil report");
         assert_eq!(decoded.report_id, report.report_id);
         assert_eq!(decoded.domain, EnvironmentalDomain::Soil);
         assert_eq!(decoded.quality_score, report.quality_score);
@@ -861,7 +901,11 @@ mod tests {
             report_id: "ocean-001".to_string(),
             domain: EnvironmentalDomain::Ocean,
             station_id: "buoy-7".to_string(),
-            location: GeoLocation { latitude: 28.5, longitude: -89.2, altitude_m: None },
+            location: GeoLocation {
+                latitude: 28.5,
+                longitude: -89.2,
+                altitude_m: None,
+            },
             observed_at: 6_000_000,
             submitted_at: 6_000_001,
             payload: ReportPayload::Ocean(OceanPayload {
@@ -898,7 +942,8 @@ mod tests {
     fn test_ocean_report_serde_roundtrip() {
         let report = sample_ocean_report();
         let json = serde_json::to_string(&report).expect("serialize ocean report");
-        let decoded: EnvironmentalReport = serde_json::from_str(&json).expect("deserialize ocean report");
+        let decoded: EnvironmentalReport =
+            serde_json::from_str(&json).expect("deserialize ocean report");
         assert_eq!(decoded.report_id, report.report_id);
         assert_eq!(decoded.domain, EnvironmentalDomain::Ocean);
         assert_eq!(decoded.quality_score, report.quality_score);
@@ -926,7 +971,11 @@ mod tests {
             report_id: "hydro-001".to_string(),
             domain: EnvironmentalDomain::Hydrology,
             station_id: "gauge-mississippi-1".to_string(),
-            location: GeoLocation { latitude: 44.9, longitude: -93.1, altitude_m: Some(215.0) },
+            location: GeoLocation {
+                latitude: 44.9,
+                longitude: -93.1,
+                altitude_m: Some(215.0),
+            },
             observed_at: 7_000_000,
             submitted_at: 7_000_001,
             payload: ReportPayload::Hydrology(HydrologyPayload {
@@ -1032,7 +1081,10 @@ mod tests {
             depth_cm: None,
         };
         let err = p.validate_bounds().unwrap_err();
-        assert!(err.contains("ph"), "expected error to mention 'ph', got: {err}");
+        assert!(
+            err.contains("ph"),
+            "expected error to mention 'ph', got: {err}"
+        );
     }
 
     #[test]
@@ -1049,7 +1101,10 @@ mod tests {
             depth_cm: None,
         };
         let err = p.validate_bounds().unwrap_err();
-        assert!(err.contains("moisture"), "expected error to mention 'moisture', got: {err}");
+        assert!(
+            err.contains("moisture"),
+            "expected error to mention 'moisture', got: {err}"
+        );
     }
 
     #[test]
@@ -1066,7 +1121,10 @@ mod tests {
             depth_cm: Some(-5.0),
         };
         let err = p.validate_bounds().unwrap_err();
-        assert!(err.contains("depth"), "expected error to mention 'depth', got: {err}");
+        assert!(
+            err.contains("depth"),
+            "expected error to mention 'depth', got: {err}"
+        );
     }
 
     // ---- OceanPayload::validate() tests ----
@@ -1117,7 +1175,10 @@ mod tests {
             depth_m: None,
         };
         let err = p.validate_bounds().unwrap_err();
-        assert!(err.contains("salinity"), "expected error to mention 'salinity', got: {err}");
+        assert!(
+            err.contains("salinity"),
+            "expected error to mention 'salinity', got: {err}"
+        );
     }
 
     #[test]
@@ -1134,7 +1195,10 @@ mod tests {
             depth_m: None,
         };
         let err = p.validate_bounds().unwrap_err();
-        assert!(err.contains("wave_height"), "expected error to mention 'wave_height', got: {err}");
+        assert!(
+            err.contains("wave_height"),
+            "expected error to mention 'wave_height', got: {err}"
+        );
     }
 
     #[test]
@@ -1151,7 +1215,10 @@ mod tests {
             depth_m: None,
         };
         let err = p.validate_bounds().unwrap_err();
-        assert!(err.contains("current_direction"), "expected error to mention 'current_direction', got: {err}");
+        assert!(
+            err.contains("current_direction"),
+            "expected error to mention 'current_direction', got: {err}"
+        );
     }
 
     // ---- HydrologyPayload::validate_bounds() tests ----
@@ -1199,7 +1266,10 @@ mod tests {
             drought_index: None,
         };
         let err = p.validate_bounds().unwrap_err();
-        assert!(err.contains("reservoir_storage"), "expected error to mention 'reservoir_storage', got: {err}");
+        assert!(
+            err.contains("reservoir_storage"),
+            "expected error to mention 'reservoir_storage', got: {err}"
+        );
     }
 
     #[test]
@@ -1215,7 +1285,10 @@ mod tests {
             drought_index: None,
         };
         let err = p.validate_bounds().unwrap_err();
-        assert!(err.contains("flood_risk"), "expected error to mention 'flood_risk', got: {err}");
+        assert!(
+            err.contains("flood_risk"),
+            "expected error to mention 'flood_risk', got: {err}"
+        );
     }
 
     #[test]
@@ -1231,7 +1304,10 @@ mod tests {
             drought_index: None,
         };
         let err = p.validate_bounds().unwrap_err();
-        assert!(err.contains("river_discharge"), "expected error to mention 'river_discharge', got: {err}");
+        assert!(
+            err.contains("river_discharge"),
+            "expected error to mention 'river_discharge', got: {err}"
+        );
     }
 
     // ---- validate_report_payload() payload bounds tests ----
@@ -1273,7 +1349,11 @@ mod tests {
             report_id: "sm-test-001".to_string(),
             domain: EnvironmentalDomain::Weather,
             station_id: "stn-sm-1".to_string(),
-            location: GeoLocation { latitude: 40.0, longitude: -105.0, altitude_m: None },
+            location: GeoLocation {
+                latitude: 40.0,
+                longitude: -105.0,
+                altitude_m: None,
+            },
             observed_at: 1_000_000,
             submitted_at: 1_000_001,
             payload: ReportPayload::Weather(WeatherPayload {

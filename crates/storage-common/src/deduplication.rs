@@ -111,9 +111,9 @@ impl DeduplicationRegistry {
             .write()
             .map_err(|e| format!("failed to acquire write lock: {e}"))?;
 
-        let entry = entries
-            .entry(canonical_hash.clone())
-            .or_insert_with(|| DedupEntry::new(canonical_hash, size_bytes, content_id.clone(), timestamp));
+        let entry = entries.entry(canonical_hash.clone()).or_insert_with(|| {
+            DedupEntry::new(canonical_hash, size_bytes, content_id.clone(), timestamp)
+        });
 
         entry.add_provider_copy(content_id);
 
@@ -123,7 +123,11 @@ impl DeduplicationRegistry {
     /// Look up a canonical hash and check if a specific provider has it.
     ///
     /// Returns the ContentId if found, None otherwise.
-    pub fn lookup(&self, canonical_hash: &str, provider_name: &str) -> Result<Option<ContentId>, String> {
+    pub fn lookup(
+        &self,
+        canonical_hash: &str,
+        provider_name: &str,
+    ) -> Result<Option<ContentId>, String> {
         let entries = self
             .entries
             .read()
@@ -205,7 +209,10 @@ impl DeduplicationRegistry {
             .read()
             .map_err(|e| format!("failed to acquire read lock: {e}"))?;
 
-        Ok(entries.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        Ok(entries
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect())
     }
 
     /// Restore the registry from a snapshot.
@@ -469,7 +476,10 @@ mod tests {
         new_registry.restore(snapshot).unwrap();
 
         assert_eq!(new_registry.lookup("abc123", "ipfs").unwrap(), Some(cid1));
-        assert_eq!(new_registry.lookup("def456", "filecoin").unwrap(), Some(cid2));
+        assert_eq!(
+            new_registry.lookup("def456", "filecoin").unwrap(),
+            Some(cid2)
+        );
     }
 
     #[test]

@@ -2,11 +2,11 @@
 //!
 //! Archives receipts to decentralized storage with CID anchoring.
 
+use thiserror::Error;
 use wrfcoin_storage_common::{
     types::{ContentId, Metadata},
     StorageProvider,
 };
-use thiserror::Error;
 
 use crate::{canonical_json, ForecastVerificationReceipt};
 
@@ -80,8 +80,8 @@ pub async fn archive_receipt(
     receipt: &ForecastVerificationReceipt,
 ) -> Result<(ContentId, Option<String>), ArchiveError> {
     // 1. Serialize the receipt to canonical JSON.
-    let canonical_bytes = canonical_json(receipt)
-        .map_err(|e| ArchiveError::SerializationError(e.to_string()))?;
+    let canonical_bytes =
+        canonical_json(receipt).map_err(|e| ArchiveError::SerializationError(e.to_string()))?;
 
     // 2. Prepare metadata for storage (including tags for retrieval and verification).
     let metadata = Metadata {
@@ -94,7 +94,10 @@ pub async fn archive_receipt(
         tags: {
             let mut tags = std::collections::HashMap::new();
             tags.insert("type".to_string(), "forecast_receipt".to_string());
-            tags.insert("manifest_digest".to_string(), receipt.manifest_digest.clone());
+            tags.insert(
+                "manifest_digest".to_string(),
+                receipt.manifest_digest.clone(),
+            );
             tags.insert("commit_id".to_string(), receipt.commit_id.clone());
             tags.insert("oracle_id".to_string(), receipt.oracle_id.clone());
             tags
@@ -147,9 +150,7 @@ mod tests {
                 .unwrap()
                 .get(&id.hash)
                 .cloned()
-                .ok_or_else(|| {
-                    wrfcoin_storage_common::StorageError::NotFound(id.hash.clone())
-                })
+                .ok_or_else(|| wrfcoin_storage_common::StorageError::NotFound(id.hash.clone()))
         }
 
         async fn exists(
@@ -159,17 +160,15 @@ mod tests {
             Ok(self.stored_data.lock().unwrap().contains_key(&id.hash))
         }
 
-        async fn delete(
-            &self,
-            id: &ContentId,
-        ) -> Result<(), wrfcoin_storage_common::StorageError> {
+        async fn delete(&self, id: &ContentId) -> Result<(), wrfcoin_storage_common::StorageError> {
             self.stored_data.lock().unwrap().remove(&id.hash);
             Ok(())
         }
 
         async fn health_check(
             &self,
-        ) -> Result<wrfcoin_storage_common::types::HealthStatus, wrfcoin_storage_common::StorageError> {
+        ) -> Result<wrfcoin_storage_common::types::HealthStatus, wrfcoin_storage_common::StorageError>
+        {
             Ok(wrfcoin_storage_common::types::HealthStatus {
                 healthy: true,
                 provider: "mock".to_string(),
@@ -180,7 +179,8 @@ mod tests {
 
         async fn stats(
             &self,
-        ) -> Result<wrfcoin_storage_common::types::StorageStats, wrfcoin_storage_common::StorageError> {
+        ) -> Result<wrfcoin_storage_common::types::StorageStats, wrfcoin_storage_common::StorageError>
+        {
             Ok(wrfcoin_storage_common::types::StorageStats {
                 total_stored: 0,
                 total_retrieved: 0,

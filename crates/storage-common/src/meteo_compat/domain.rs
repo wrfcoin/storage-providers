@@ -175,11 +175,17 @@ pub struct ProvenanceEntry {
 pub struct ProvenanceChain(pub Vec<ProvenanceEntry>);
 
 impl ProvenanceChain {
-    pub fn new(entries: Vec<ProvenanceEntry>) -> Self { Self(entries) }
+    pub fn new(entries: Vec<ProvenanceEntry>) -> Self {
+        Self(entries)
+    }
     /// Returns `true` if the chain contains no attestation entries.
-    pub fn is_empty(&self) -> bool { self.0.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
     /// Returns the number of attestation entries in the chain.
-    pub fn len(&self) -> usize { self.0.len() }
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
 }
 
 /// A complete environmental observation report.
@@ -441,7 +447,10 @@ mod tests {
     fn environmental_domain_display() {
         assert_eq!(EnvironmentalDomain::Weather.to_string(), "Weather");
         assert_eq!(EnvironmentalDomain::AirQuality.to_string(), "AirQuality");
-        assert_eq!(EnvironmentalDomain::WaterQuality.to_string(), "WaterQuality");
+        assert_eq!(
+            EnvironmentalDomain::WaterQuality.to_string(),
+            "WaterQuality"
+        );
         assert_eq!(EnvironmentalDomain::Wildfire.to_string(), "Wildfire");
         assert_eq!(EnvironmentalDomain::Soil.to_string(), "Soil");
         assert_eq!(EnvironmentalDomain::Ocean.to_string(), "Ocean");

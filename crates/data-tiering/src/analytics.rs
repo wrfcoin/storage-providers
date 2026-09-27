@@ -236,7 +236,12 @@ const ALL_DOMAINS: [EnvironmentalDomain; 7] = [
 ];
 
 /// All known `DataTier` variants in hotness order.
-const ALL_TIERS: [DataTier; 4] = [DataTier::Hot, DataTier::Warm, DataTier::Cold, DataTier::Archive];
+const ALL_TIERS: [DataTier; 4] = [
+    DataTier::Hot,
+    DataTier::Warm,
+    DataTier::Cold,
+    DataTier::Archive,
+];
 
 fn tier_name(tier: &DataTier) -> &'static str {
     match tier {
@@ -297,8 +302,7 @@ impl StorageAnalytics {
 
     /// Serialize `snapshot` to a pretty-printed JSON string.
     pub fn export_json(snapshot: &StorageSnapshot) -> String {
-        serde_json::to_string_pretty(snapshot)
-            .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"))
+        serde_json::to_string_pretty(snapshot).unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"))
     }
 
     /// Serialize `snapshot` to [Prometheus text exposition format][prom].
@@ -314,65 +318,141 @@ impl StorageAnalytics {
         let mut out = String::with_capacity(4096);
 
         // ---- Provider metrics ----
-        prom_comment(&mut out, "wrfcoin_storage_provider_objects_stored",
-            "gauge", "Successful archive operations per provider");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_provider_objects_stored",
+            "gauge",
+            "Successful archive operations per provider",
+        );
         for p in &snapshot.providers {
-            prom_line(&mut out, "wrfcoin_storage_provider_objects_stored",
-                &[("provider", &p.name)], p.objects_stored as f64, ts_ms);
+            prom_line(
+                &mut out,
+                "wrfcoin_storage_provider_objects_stored",
+                &[("provider", &p.name)],
+                p.objects_stored as f64,
+                ts_ms,
+            );
         }
 
-        prom_comment(&mut out, "wrfcoin_storage_provider_bytes_stored",
-            "gauge", "Total bytes stored per provider");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_provider_bytes_stored",
+            "gauge",
+            "Total bytes stored per provider",
+        );
         for p in &snapshot.providers {
-            prom_line(&mut out, "wrfcoin_storage_provider_bytes_stored",
-                &[("provider", &p.name)], p.bytes_stored as f64, ts_ms);
+            prom_line(
+                &mut out,
+                "wrfcoin_storage_provider_bytes_stored",
+                &[("provider", &p.name)],
+                p.bytes_stored as f64,
+                ts_ms,
+            );
         }
 
-        prom_comment(&mut out, "wrfcoin_storage_provider_avg_retrieval_latency_ms",
-            "gauge", "Average retrieval latency per provider in milliseconds");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_provider_avg_retrieval_latency_ms",
+            "gauge",
+            "Average retrieval latency per provider in milliseconds",
+        );
         for p in &snapshot.providers {
-            prom_line(&mut out, "wrfcoin_storage_provider_avg_retrieval_latency_ms",
-                &[("provider", &p.name)], p.avg_retrieval_latency_ms, ts_ms);
+            prom_line(
+                &mut out,
+                "wrfcoin_storage_provider_avg_retrieval_latency_ms",
+                &[("provider", &p.name)],
+                p.avg_retrieval_latency_ms,
+                ts_ms,
+            );
         }
 
-        prom_comment(&mut out, "wrfcoin_storage_provider_error_rate",
-            "gauge", "Fraction of archive attempts that failed per provider");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_provider_error_rate",
+            "gauge",
+            "Fraction of archive attempts that failed per provider",
+        );
         for p in &snapshot.providers {
-            prom_line(&mut out, "wrfcoin_storage_provider_error_rate",
-                &[("provider", &p.name)], p.error_rate, ts_ms);
+            prom_line(
+                &mut out,
+                "wrfcoin_storage_provider_error_rate",
+                &[("provider", &p.name)],
+                p.error_rate,
+                ts_ms,
+            );
         }
 
-        prom_comment(&mut out, "wrfcoin_storage_provider_healthy",
-            "gauge", "Provider health status (1=healthy, 0=unhealthy)");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_provider_healthy",
+            "gauge",
+            "Provider health status (1=healthy, 0=unhealthy)",
+        );
         for p in &snapshot.providers {
-            prom_line(&mut out, "wrfcoin_storage_provider_healthy",
-                &[("provider", &p.name)], if p.healthy { 1.0 } else { 0.0 }, ts_ms);
+            prom_line(
+                &mut out,
+                "wrfcoin_storage_provider_healthy",
+                &[("provider", &p.name)],
+                if p.healthy { 1.0 } else { 0.0 },
+                ts_ms,
+            );
         }
 
-        prom_comment(&mut out, "wrfcoin_storage_provider_cost_to_date_usd",
-            "gauge", "Cumulative cost to date per provider in USD");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_provider_cost_to_date_usd",
+            "gauge",
+            "Cumulative cost to date per provider in USD",
+        );
         for p in &snapshot.providers {
-            prom_line(&mut out, "wrfcoin_storage_provider_cost_to_date_usd",
-                &[("provider", &p.name)], p.cost_to_date, ts_ms);
+            prom_line(
+                &mut out,
+                "wrfcoin_storage_provider_cost_to_date_usd",
+                &[("provider", &p.name)],
+                p.cost_to_date,
+                ts_ms,
+            );
         }
 
         // ---- Tier metrics ----
-        prom_comment(&mut out, "wrfcoin_storage_tier_bytes_stored",
-            "gauge", "Bytes stored per tier");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_tier_bytes_stored",
+            "gauge",
+            "Bytes stored per tier",
+        );
         for t in &snapshot.tiers {
-            prom_line(&mut out, "wrfcoin_storage_tier_bytes_stored",
-                &[("tier", &t.tier)], t.bytes_stored as f64, ts_ms);
+            prom_line(
+                &mut out,
+                "wrfcoin_storage_tier_bytes_stored",
+                &[("tier", &t.tier)],
+                t.bytes_stored as f64,
+                ts_ms,
+            );
         }
 
-        prom_comment(&mut out, "wrfcoin_storage_tier_cost_to_date_usd",
-            "gauge", "Cumulative spend per tier in USD");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_tier_cost_to_date_usd",
+            "gauge",
+            "Cumulative spend per tier in USD",
+        );
         for t in &snapshot.tiers {
-            prom_line(&mut out, "wrfcoin_storage_tier_cost_to_date_usd",
-                &[("tier", &t.tier)], t.cost_to_date, ts_ms);
+            prom_line(
+                &mut out,
+                "wrfcoin_storage_tier_cost_to_date_usd",
+                &[("tier", &t.tier)],
+                t.cost_to_date,
+                ts_ms,
+            );
         }
 
-        prom_comment(&mut out, "wrfcoin_storage_tier_budget_remaining_usd",
-            "gauge", "Budget remaining per tier in USD (+Inf when unlimited)");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_tier_budget_remaining_usd",
+            "gauge",
+            "Budget remaining per tier in USD (+Inf when unlimited)",
+        );
         for t in &snapshot.tiers {
             // Prometheus represents +Inf as the literal string "+Inf".
             let remaining_str = if t.budget_remaining.is_infinite() && t.budget_remaining > 0.0 {
@@ -386,110 +466,200 @@ impl StorageAnalytics {
             ));
         }
 
-        prom_comment(&mut out, "wrfcoin_storage_tier_utilization_pct",
-            "gauge", "Tier utilization as percentage of max_size_bytes (0 when unlimited)");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_tier_utilization_pct",
+            "gauge",
+            "Tier utilization as percentage of max_size_bytes (0 when unlimited)",
+        );
         for t in &snapshot.tiers {
-            prom_line(&mut out, "wrfcoin_storage_tier_utilization_pct",
-                &[("tier", &t.tier)], t.utilization_pct, ts_ms);
+            prom_line(
+                &mut out,
+                "wrfcoin_storage_tier_utilization_pct",
+                &[("tier", &t.tier)],
+                t.utilization_pct,
+                ts_ms,
+            );
         }
 
         // ---- Domain metrics ----
-        prom_comment(&mut out, "wrfcoin_storage_domain_objects_total",
-            "gauge", "Objects stored per environmental domain");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_domain_objects_total",
+            "gauge",
+            "Objects stored per environmental domain",
+        );
         for d in &snapshot.domains {
-            prom_line(&mut out, "wrfcoin_storage_domain_objects_total",
-                &[("domain", &d.domain)], d.object_count as f64, ts_ms);
+            prom_line(
+                &mut out,
+                "wrfcoin_storage_domain_objects_total",
+                &[("domain", &d.domain)],
+                d.object_count as f64,
+                ts_ms,
+            );
         }
 
-        prom_comment(&mut out, "wrfcoin_storage_domain_bytes_stored",
-            "gauge", "Bytes stored per environmental domain");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_domain_bytes_stored",
+            "gauge",
+            "Bytes stored per environmental domain",
+        );
         for d in &snapshot.domains {
-            prom_line(&mut out, "wrfcoin_storage_domain_bytes_stored",
-                &[("domain", &d.domain)], d.bytes_stored as f64, ts_ms);
+            prom_line(
+                &mut out,
+                "wrfcoin_storage_domain_bytes_stored",
+                &[("domain", &d.domain)],
+                d.bytes_stored as f64,
+                ts_ms,
+            );
         }
 
         // ---- Budget summary ----
-        prom_comment(&mut out, "wrfcoin_storage_budget_total_spend_usd",
-            "gauge", "Total spend across all tiers in USD");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_budget_total_spend_usd",
+            "gauge",
+            "Total spend across all tiers in USD",
+        );
         out.push_str(&format!(
             "wrfcoin_storage_budget_total_spend_usd {} {}\n",
             snapshot.budget.total_spend, ts_ms
         ));
 
         // ---- SLA metrics ----
-        prom_comment(&mut out, "wrfcoin_storage_sla_met",
-            "gauge", "SLA compliance per report class (1=met, 0=not met)");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_sla_met",
+            "gauge",
+            "SLA compliance per report class (1=met, 0=not met)",
+        );
         for s in &snapshot.sla_compliance {
-            prom_line(&mut out, "wrfcoin_storage_sla_met",
-                &[("class", &s.class)], if s.sla_met { 1.0 } else { 0.0 }, ts_ms);
+            prom_line(
+                &mut out,
+                "wrfcoin_storage_sla_met",
+                &[("class", &s.class)],
+                if s.sla_met { 1.0 } else { 0.0 },
+                ts_ms,
+            );
         }
 
-        prom_comment(&mut out, "wrfcoin_storage_sla_actual_replicas",
-            "gauge", "Actual replica count per report class");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_sla_actual_replicas",
+            "gauge",
+            "Actual replica count per report class",
+        );
         for s in &snapshot.sla_compliance {
-            prom_line(&mut out, "wrfcoin_storage_sla_actual_replicas",
-                &[("class", &s.class)], s.actual_replicas as f64, ts_ms);
+            prom_line(
+                &mut out,
+                "wrfcoin_storage_sla_actual_replicas",
+                &[("class", &s.class)],
+                s.actual_replicas as f64,
+                ts_ms,
+            );
         }
 
-        prom_comment(&mut out, "wrfcoin_storage_sla_target_replicas",
-            "gauge", "Target replica count per report class");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_sla_target_replicas",
+            "gauge",
+            "Target replica count per report class",
+        );
         for s in &snapshot.sla_compliance {
-            prom_line(&mut out, "wrfcoin_storage_sla_target_replicas",
-                &[("class", &s.class)], s.target_replicas as f64, ts_ms);
+            prom_line(
+                &mut out,
+                "wrfcoin_storage_sla_target_replicas",
+                &[("class", &s.class)],
+                s.target_replicas as f64,
+                ts_ms,
+            );
         }
 
         // ---- Failover metrics ----
-        prom_comment(&mut out, "wrfcoin_storage_failover_requests_total",
-            "counter", "Total requests routed through the failover layer");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_failover_requests_total",
+            "counter",
+            "Total requests routed through the failover layer",
+        );
         out.push_str(&format!(
             "wrfcoin_storage_failover_requests_total {} {}\n",
             snapshot.failover.total_requests, ts_ms
         ));
 
-        prom_comment(&mut out, "wrfcoin_storage_failover_primary_successes_total",
-            "counter", "Requests served by the primary provider");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_failover_primary_successes_total",
+            "counter",
+            "Requests served by the primary provider",
+        );
         out.push_str(&format!(
             "wrfcoin_storage_failover_primary_successes_total {} {}\n",
             snapshot.failover.primary_successes, ts_ms
         ));
 
-        prom_comment(&mut out, "wrfcoin_storage_failover_count_total",
-            "counter", "Requests that required failover to a secondary provider");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_failover_count_total",
+            "counter",
+            "Requests that required failover to a secondary provider",
+        );
         out.push_str(&format!(
             "wrfcoin_storage_failover_count_total {} {}\n",
             snapshot.failover.failover_count, ts_ms
         ));
 
-        prom_comment(&mut out, "wrfcoin_storage_failover_failures_total",
-            "counter", "Requests where every provider failed");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_failover_failures_total",
+            "counter",
+            "Requests where every provider failed",
+        );
         out.push_str(&format!(
             "wrfcoin_storage_failover_failures_total {} {}\n",
             snapshot.failover.total_failures, ts_ms
         ));
 
-        prom_comment(&mut out, "wrfcoin_storage_integrity_checks_total",
-            "counter", "Integrity checks performed");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_integrity_checks_total",
+            "counter",
+            "Integrity checks performed",
+        );
         out.push_str(&format!(
             "wrfcoin_storage_integrity_checks_total {} {}\n",
             snapshot.failover.integrity_checks, ts_ms
         ));
 
-        prom_comment(&mut out, "wrfcoin_storage_integrity_failures_total",
-            "counter", "Integrity checks that detected data corruption");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_integrity_failures_total",
+            "counter",
+            "Integrity checks that detected data corruption",
+        );
         out.push_str(&format!(
             "wrfcoin_storage_integrity_failures_total {} {}\n",
             snapshot.failover.integrity_failures, ts_ms
         ));
 
-        prom_comment(&mut out, "wrfcoin_storage_primary_success_rate",
-            "gauge", "Fraction of requests served by the primary provider (0.0–1.0)");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_primary_success_rate",
+            "gauge",
+            "Fraction of requests served by the primary provider (0.0–1.0)",
+        );
         out.push_str(&format!(
             "wrfcoin_storage_primary_success_rate {} {}\n",
             snapshot.failover.primary_success_rate, ts_ms
         ));
 
-        prom_comment(&mut out, "wrfcoin_storage_avg_store_latency_ms",
-            "gauge", "Average store latency across the failover layer in milliseconds");
+        prom_comment(
+            &mut out,
+            "wrfcoin_storage_avg_store_latency_ms",
+            "gauge",
+            "Average store latency across the failover layer in milliseconds",
+        );
         out.push_str(&format!(
             "wrfcoin_storage_avg_store_latency_ms {} {}\n",
             snapshot.failover.avg_store_latency_ms, ts_ms
@@ -544,10 +714,7 @@ impl StorageAnalytics {
                 let config = tiering_config.config_for(tier);
                 let spend = budget.tier_spend(tier);
                 let remaining = budget.remaining(tier);
-                let bytes_stored = tier_bytes
-                    .and_then(|m| m.get(tier))
-                    .copied()
-                    .unwrap_or(0);
+                let bytes_stored = tier_bytes.and_then(|m| m.get(tier)).copied().unwrap_or(0);
 
                 let utilization_pct = if config.max_size_bytes > 0 {
                     (bytes_stored as f64 / config.max_size_bytes as f64 * 100.0).min(100.0)
@@ -669,9 +836,9 @@ fn prom_line(out: &mut String, name: &str, labels: &[(&str, &str)], value: f64, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metrics::MetricsCollector;
     use std::collections::HashMap;
     use wrfcoin_storage_common::{AvailabilitySlaStatus, FailoverMetrics, StorageStats};
-    use crate::metrics::MetricsCollector;
 
     fn empty_input<'a>(
         budget: &'a StorageBudget,
@@ -908,7 +1075,10 @@ mod tests {
         // Insert 3 Weather and 1 Ocean entry
         for i in 0u32..3 {
             index.insert(IndexEntry {
-                content_id: ContentId { provider: "ipfs".into(), hash: format!("hash-w{i}") },
+                content_id: ContentId {
+                    provider: "ipfs".into(),
+                    hash: format!("hash-w{i}"),
+                },
                 domain: EnvironmentalDomain::Weather,
                 station_id: format!("stn-{i}"),
                 report_id: format!("rpt-w{i}"),
@@ -916,7 +1086,10 @@ mod tests {
             });
         }
         index.insert(IndexEntry {
-            content_id: ContentId { provider: "ipfs".into(), hash: "hash-o1".into() },
+            content_id: ContentId {
+                provider: "ipfs".into(),
+                hash: "hash-o1".into(),
+            },
             domain: EnvironmentalDomain::Ocean,
             station_id: "stn-o".into(),
             report_id: "rpt-o1".into(),
@@ -932,7 +1105,11 @@ mod tests {
         let ocean = snap.domains.iter().find(|d| d.domain == "Ocean").unwrap();
         assert_eq!(ocean.object_count, 1);
 
-        let air = snap.domains.iter().find(|d| d.domain == "AirQuality").unwrap();
+        let air = snap
+            .domains
+            .iter()
+            .find(|d| d.domain == "AirQuality")
+            .unwrap();
         assert_eq!(air.object_count, 0);
     }
 
@@ -989,7 +1166,12 @@ mod tests {
         assert!((snap.budget.total_spend - 16.0).abs() < f64::EPSILON);
         assert_eq!(snap.budget.per_tier.len(), 4);
 
-        let hot = snap.budget.per_tier.iter().find(|t| t.tier == "Hot").unwrap();
+        let hot = snap
+            .budget
+            .per_tier
+            .iter()
+            .find(|t| t.tier == "Hot")
+            .unwrap();
         assert!((hot.spend - 10.0).abs() < f64::EPSILON);
     }
 
@@ -1174,8 +1356,8 @@ mod tests {
         let snap = analytics.snapshot(&empty_input(&budget, &config, &index, &failover));
 
         let json = StorageAnalytics::export_json(&snap);
-        let parsed: serde_json::Value = serde_json::from_str(&json)
-            .expect("export_json must produce valid JSON");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json).expect("export_json must produce valid JSON");
         assert!(parsed.get("timestamp").is_some());
         assert!(parsed.get("providers").is_some());
         assert!(parsed.get("tiers").is_some());
@@ -1218,7 +1400,10 @@ mod tests {
 
     #[test]
     fn test_export_prometheus_provider_metrics() {
-        let stats = StorageStats { total_bytes: 512, ..Default::default() };
+        let stats = StorageStats {
+            total_bytes: 512,
+            ..Default::default()
+        };
         let metrics = InMemoryMetrics::new();
         metrics.record_archive_attempt("ipfs", true);
 
@@ -1320,7 +1505,15 @@ mod tests {
         let snap = analytics.snapshot(&empty_input(&budget, &config, &index, &failover));
         let prom = StorageAnalytics::export_prometheus(&snap);
 
-        for domain in ["Weather", "AirQuality", "Soil", "Ocean", "Hydrology", "Wildfire", "WaterQuality"] {
+        for domain in [
+            "Weather",
+            "AirQuality",
+            "Soil",
+            "Ocean",
+            "Hydrology",
+            "Wildfire",
+            "WaterQuality",
+        ] {
             assert!(
                 prom.contains(&format!(r#"domain="{domain}""#)),
                 "Prometheus output missing domain: {domain}"
