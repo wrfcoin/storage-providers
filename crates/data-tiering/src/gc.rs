@@ -11,8 +11,8 @@ use wrfcoin_storage_common::{
     DomainContentIndex,
 };
 
+use crate::dedup_registry::{gc_adapter, PersistentDedupRegistry};
 use crate::retention::RetentionManager;
-use crate::dedup_registry::{PersistentDedupRegistry, gc_adapter};
 
 /// Summary of garbage collection actions taken.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -230,9 +230,9 @@ impl GarbageCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wrfcoin_storage_common::types::ContentId;
-    use std::sync::{Arc, Mutex};
     use async_trait::async_trait;
+    use std::sync::{Arc, Mutex};
+    use wrfcoin_storage_common::types::ContentId;
 
     /// Mock storage provider for testing.
     struct MockProvider {
@@ -272,11 +272,17 @@ mod tests {
             })
         }
 
-        async fn retrieve(&self, id: &ContentId) -> Result<Vec<u8>, wrfcoin_storage_common::StorageError> {
+        async fn retrieve(
+            &self,
+            id: &ContentId,
+        ) -> Result<Vec<u8>, wrfcoin_storage_common::StorageError> {
             Ok(vec![1, 2, 3])
         }
 
-        async fn exists(&self, _id: &ContentId) -> Result<bool, wrfcoin_storage_common::StorageError> {
+        async fn exists(
+            &self,
+            _id: &ContentId,
+        ) -> Result<bool, wrfcoin_storage_common::StorageError> {
             Ok(true)
         }
 
@@ -290,7 +296,8 @@ mod tests {
 
         async fn health_check(
             &self,
-        ) -> Result<wrfcoin_storage_common::types::HealthStatus, wrfcoin_storage_common::StorageError> {
+        ) -> Result<wrfcoin_storage_common::types::HealthStatus, wrfcoin_storage_common::StorageError>
+        {
             Ok(wrfcoin_storage_common::types::HealthStatus {
                 healthy: true,
                 provider: "mock".to_string(),
@@ -301,7 +308,8 @@ mod tests {
 
         async fn stats(
             &self,
-        ) -> Result<wrfcoin_storage_common::types::StorageStats, wrfcoin_storage_common::StorageError> {
+        ) -> Result<wrfcoin_storage_common::types::StorageStats, wrfcoin_storage_common::StorageError>
+        {
             Ok(wrfcoin_storage_common::types::StorageStats {
                 total_stored: 0,
                 total_retrieved: 0,
@@ -316,11 +324,8 @@ mod tests {
         let mut retention = RetentionManager::new();
 
         // Add a policy that expires after 1000 seconds.
-        let mut policy = wrfcoin_storage_common::types::RetentionPolicy::new(
-            "weather",
-            DataTier::Cold,
-            1,
-        );
+        let mut policy =
+            wrfcoin_storage_common::types::RetentionPolicy::new("weather", DataTier::Cold, 1);
         policy.max_age_secs = 1000;
         retention.add_policy(policy);
 
@@ -351,13 +356,20 @@ mod tests {
             .await;
 
         assert_eq!(summary.items_evaluated, 1);
-        assert_eq!(summary.items_deleted, 1, "expired content should be deleted");
+        assert_eq!(
+            summary.items_deleted, 1,
+            "expired content should be deleted"
+        );
         assert!(
             !summary.is_empty(),
             "summary should show cleanup was performed"
         );
         // Verify provider.delete() was called
-        assert_eq!(provider.deleted_count(), 1, "provider.delete() should have been called");
+        assert_eq!(
+            provider.deleted_count(),
+            1,
+            "provider.delete() should have been called"
+        );
     }
 
     #[tokio::test]
@@ -384,7 +396,10 @@ mod tests {
             .await;
 
         assert_eq!(summary.items_evaluated, 1);
-        assert_eq!(summary.items_deleted, 0, "non-expired content should be retained");
+        assert_eq!(
+            summary.items_deleted, 0,
+            "non-expired content should be retained"
+        );
     }
 
     #[tokio::test]
@@ -451,7 +466,10 @@ mod tests {
             .gc_sweep(2000, 24 * 3600, DataTier::Cold, false, &provider)
             .await;
 
-        assert!(summary.is_empty(), "summary should be empty when no cleanup occurs");
+        assert!(
+            summary.is_empty(),
+            "summary should be empty when no cleanup occurs"
+        );
     }
 
     #[tokio::test]
@@ -483,7 +501,11 @@ mod tests {
         assert_eq!(summary.items_evaluated, 5);
         assert_eq!(summary.items_deleted, 5);
         // Verify all entries were deleted
-        assert_eq!(provider.deleted_count(), 5, "all expired entries should be deleted");
+        assert_eq!(
+            provider.deleted_count(),
+            5,
+            "all expired entries should be deleted"
+        );
     }
 
     #[tokio::test]
@@ -510,7 +532,10 @@ mod tests {
             .await;
 
         assert_eq!(summary.items_evaluated, 1);
-        assert_eq!(summary.items_deleted, 1, "dry_run should still count deletions");
+        assert_eq!(
+            summary.items_deleted, 1,
+            "dry_run should still count deletions"
+        );
         // But provider.delete() should NOT have been called
         assert_eq!(
             provider.deleted_count(),
@@ -524,11 +549,13 @@ mod tests {
         let mut retention = RetentionManager::new();
 
         // Add separate policies for Cold and Hot tiers
-        let mut cold_policy = wrfcoin_storage_common::types::RetentionPolicy::new("weather", DataTier::Cold, 1);
+        let mut cold_policy =
+            wrfcoin_storage_common::types::RetentionPolicy::new("weather", DataTier::Cold, 1);
         cold_policy.max_age_secs = 1000;
         retention.add_policy(cold_policy);
 
-        let mut hot_policy = wrfcoin_storage_common::types::RetentionPolicy::new("weather", DataTier::Hot, 1);
+        let mut hot_policy =
+            wrfcoin_storage_common::types::RetentionPolicy::new("weather", DataTier::Hot, 1);
         hot_policy.max_age_secs = 10000; // Much longer for Hot tier
         retention.add_policy(hot_policy);
 
@@ -552,13 +579,19 @@ mod tests {
         let cold_summary = gc
             .gc_sweep(3000, 24 * 3600, DataTier::Cold, false, &provider)
             .await;
-        assert_eq!(cold_summary.items_deleted, 1, "Cold tier should delete expired content");
+        assert_eq!(
+            cold_summary.items_deleted, 1,
+            "Cold tier should delete expired content"
+        );
 
         // Sweeping Hot tier should NOT delete (2000 < 10000)
         let hot_summary = gc
             .gc_sweep(3000, 24 * 3600, DataTier::Hot, false, &provider)
             .await;
-        assert_eq!(hot_summary.items_deleted, 0, "Hot tier should retain content");
+        assert_eq!(
+            hot_summary.items_deleted, 0,
+            "Hot tier should retain content"
+        );
     }
 
     #[test]

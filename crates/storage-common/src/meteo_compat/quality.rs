@@ -197,8 +197,14 @@ mod tests {
     #[test]
     fn band_classification() {
         assert_eq!(DataQualityBand::from_score(0.95), DataQualityBand::High);
-        assert_eq!(DataQualityBand::from_score(0.75), DataQualityBand::Borderline);
-        assert_eq!(DataQualityBand::from_score(0.60), DataQualityBand::WarningOnly);
+        assert_eq!(
+            DataQualityBand::from_score(0.75),
+            DataQualityBand::Borderline
+        );
+        assert_eq!(
+            DataQualityBand::from_score(0.60),
+            DataQualityBand::WarningOnly
+        );
         assert_eq!(DataQualityBand::from_score(0.30), DataQualityBand::Low);
     }
 
@@ -277,8 +283,14 @@ mod tests {
     #[test]
     fn boundary_values() {
         assert_eq!(DataQualityBand::from_score(0.85), DataQualityBand::High);
-        assert_eq!(DataQualityBand::from_score(0.70), DataQualityBand::Borderline);
-        assert_eq!(DataQualityBand::from_score(0.50), DataQualityBand::WarningOnly);
+        assert_eq!(
+            DataQualityBand::from_score(0.70),
+            DataQualityBand::Borderline
+        );
+        assert_eq!(
+            DataQualityBand::from_score(0.50),
+            DataQualityBand::WarningOnly
+        );
         assert_eq!(DataQualityBand::from_score(0.0), DataQualityBand::Low);
     }
 

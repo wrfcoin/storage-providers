@@ -97,11 +97,7 @@ impl RemotePinningClient {
     /// # Returns
     ///
     /// Request ID assigned by the service if successful.
-    pub async fn request_pin(
-        &self,
-        cid: &str,
-        name: Option<&str>,
-    ) -> Result<String, String> {
+    pub async fn request_pin(&self, cid: &str, name: Option<&str>) -> Result<String, String> {
         // Build PSA POST /pins request body
         let _body = serde_json::json!({
             "cid": cid,
@@ -120,7 +116,10 @@ impl RemotePinningClient {
                 .pin_status_cache
                 .write()
                 .map_err(|e| format!("failed to acquire write lock: {}", e))?;
-            cache.insert(cid.to_string(), (RemotePinStatus::Queued, request_id.clone()));
+            cache.insert(
+                cid.to_string(),
+                (RemotePinStatus::Queued, request_id.clone()),
+            );
         }
 
         Ok(request_id)
@@ -199,10 +198,7 @@ impl RemotePinningClient {
 
     /// Get cached pin status for a CID.
     pub fn get_cached_status(&self, cid: &str) -> Option<RemotePinStatus> {
-        let cache = self
-            .pin_status_cache
-            .read()
-            .ok()?;
+        let cache = self.pin_status_cache.read().ok()?;
 
         cache.get(cid).map(|(status, _)| *status)
     }
@@ -269,7 +265,11 @@ impl RemotePinningManager {
     }
 
     /// Request a pin on all configured services.
-    pub async fn request_pin_on_all(&self, cid: &str, name: Option<&str>) -> Result<HashMap<String, String>, String> {
+    pub async fn request_pin_on_all(
+        &self,
+        cid: &str,
+        name: Option<&str>,
+    ) -> Result<HashMap<String, String>, String> {
         let mut results = HashMap::new();
 
         for (service_name, _) in &self.clients {
@@ -314,7 +314,10 @@ impl RemotePinningManager {
     }
 
     /// Check status of a pin on all services.
-    pub async fn check_pin_status_on_all(&self, cid: &str) -> Result<HashMap<String, RemotePinStatus>, String> {
+    pub async fn check_pin_status_on_all(
+        &self,
+        cid: &str,
+    ) -> Result<HashMap<String, RemotePinStatus>, String> {
         let mut results = HashMap::new();
 
         let pins = self
@@ -455,7 +458,10 @@ mod tests {
         manager.add_service(config);
 
         let cid = "QmManager";
-        let request_id = manager.request_pin_on_service("test", cid, None).await.unwrap();
+        let request_id = manager
+            .request_pin_on_service("test", cid, None)
+            .await
+            .unwrap();
 
         assert!(!request_id.is_empty());
 

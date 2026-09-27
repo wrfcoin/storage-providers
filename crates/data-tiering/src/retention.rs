@@ -367,7 +367,9 @@ mod tests {
         let mgr = RetentionManager::with_environmental_defaults();
         let policies = mgr.policies_for("soil.observation");
         // Soil data is valuable long-term — max_age_secs should be >= 1 year or 0 (never expires)
-        assert!(policies.iter().any(|p| p.max_age_secs == 0 || p.max_age_secs >= 365 * 86400));
+        assert!(policies
+            .iter()
+            .any(|p| p.max_age_secs == 0 || p.max_age_secs >= 365 * 86400));
     }
 
     #[test]

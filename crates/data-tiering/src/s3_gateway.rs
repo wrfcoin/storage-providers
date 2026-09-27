@@ -220,7 +220,9 @@ impl std::fmt::Display for S3GatewayError {
             S3GatewayError::ObjectNotFound { bucket, key } => {
                 write!(f, "Object not found: s3://{}/{}", bucket, key)
             }
-            S3GatewayError::InvalidContentId { reason } => write!(f, "Invalid content ID: {}", reason),
+            S3GatewayError::InvalidContentId { reason } => {
+                write!(f, "Invalid content ID: {}", reason)
+            }
             S3GatewayError::StorageError { reason } => write!(f, "Storage error: {}", reason),
             S3GatewayError::AuthenticationError { reason } => write!(f, "Auth error: {}", reason),
             S3GatewayError::InvalidRequest { reason } => write!(f, "Invalid request: {}", reason),
@@ -260,9 +262,11 @@ impl S3Gateway {
 
     /// Get the tier for a bucket.
     pub fn get_tier(&self, bucket: &str) -> Result<DataTier, S3GatewayError> {
-        self.bucket_mapping.get_tier(bucket).ok_or(S3GatewayError::BucketNotFound {
-            bucket: bucket.to_string(),
-        })
+        self.bucket_mapping
+            .get_tier(bucket)
+            .ok_or(S3GatewayError::BucketNotFound {
+                bucket: bucket.to_string(),
+            })
     }
 
     /// List all configured buckets.
@@ -280,9 +284,12 @@ impl S3Gateway {
         let key_path = format!("{}/{}", req.bucket, req.key);
 
         // Retrieve from test store
-        let store = self.test_store.read().map_err(|_| S3GatewayError::StorageError {
-            reason: "failed to acquire read lock".to_string(),
-        })?;
+        let store = self
+            .test_store
+            .read()
+            .map_err(|_| S3GatewayError::StorageError {
+                reason: "failed to acquire read lock".to_string(),
+            })?;
 
         let data = store
             .get(&key_path)
@@ -316,9 +323,12 @@ impl S3Gateway {
         let key_path = format!("{}/{}", req.bucket, req.key);
 
         // Store in test store
-        let mut store = self.test_store.write().map_err(|_| S3GatewayError::StorageError {
-            reason: "failed to acquire write lock".to_string(),
-        })?;
+        let mut store = self
+            .test_store
+            .write()
+            .map_err(|_| S3GatewayError::StorageError {
+                reason: "failed to acquire write lock".to_string(),
+            })?;
 
         store.insert(key_path.clone(), req.data.clone());
 
@@ -346,7 +356,10 @@ impl S3Gateway {
     }
 
     /// Handle HeadObject request.
-    pub fn head_object(&self, req: &HeadObjectRequest) -> Result<HeadObjectResponse, S3GatewayError> {
+    pub fn head_object(
+        &self,
+        req: &HeadObjectRequest,
+    ) -> Result<HeadObjectResponse, S3GatewayError> {
         self.record_metric("HeadObject");
 
         // Verify bucket exists
@@ -354,9 +367,12 @@ impl S3Gateway {
 
         let key_path = format!("{}/{}", req.bucket, req.key);
 
-        let store = self.test_store.read().map_err(|_| S3GatewayError::StorageError {
-            reason: "failed to acquire read lock".to_string(),
-        })?;
+        let store = self
+            .test_store
+            .read()
+            .map_err(|_| S3GatewayError::StorageError {
+                reason: "failed to acquire read lock".to_string(),
+            })?;
 
         let exists = store.contains_key(&key_path);
         let (content_length, etag) = if exists {
@@ -377,7 +393,10 @@ impl S3Gateway {
     }
 
     /// Handle DeleteObject request.
-    pub fn delete_object(&self, req: &DeleteObjectRequest) -> Result<DeleteObjectResponse, S3GatewayError> {
+    pub fn delete_object(
+        &self,
+        req: &DeleteObjectRequest,
+    ) -> Result<DeleteObjectResponse, S3GatewayError> {
         self.record_metric("DeleteObject");
 
         // Verify bucket exists
@@ -385,9 +404,12 @@ impl S3Gateway {
 
         let key_path = format!("{}/{}", req.bucket, req.key);
 
-        let mut store = self.test_store.write().map_err(|_| S3GatewayError::StorageError {
-            reason: "failed to acquire write lock".to_string(),
-        })?;
+        let mut store = self
+            .test_store
+            .write()
+            .map_err(|_| S3GatewayError::StorageError {
+                reason: "failed to acquire write lock".to_string(),
+            })?;
 
         let deleted = store.remove(&key_path).is_some();
 
@@ -399,15 +421,21 @@ impl S3Gateway {
     }
 
     /// Handle ListObjectsV2 request.
-    pub fn list_objects_v2(&self, req: &ListObjectsV2Request) -> Result<ListObjectsV2Response, S3GatewayError> {
+    pub fn list_objects_v2(
+        &self,
+        req: &ListObjectsV2Request,
+    ) -> Result<ListObjectsV2Response, S3GatewayError> {
         self.record_metric("ListObjectsV2");
 
         // Verify bucket exists
         self.get_tier(&req.bucket)?;
 
-        let store = self.test_store.read().map_err(|_| S3GatewayError::StorageError {
-            reason: "failed to acquire read lock".to_string(),
-        })?;
+        let store = self
+            .test_store
+            .read()
+            .map_err(|_| S3GatewayError::StorageError {
+                reason: "failed to acquire read lock".to_string(),
+            })?;
 
         let bucket_prefix = format!("{}/", req.bucket);
         let mut contents = Vec::new();
@@ -461,7 +489,10 @@ impl S3Gateway {
 
     /// Get metric counts.
     pub fn metrics(&self) -> HashMap<String, u64> {
-        self.metrics.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.metrics
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Get metric for a specific operation.

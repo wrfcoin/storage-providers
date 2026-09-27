@@ -137,7 +137,8 @@ impl ArchivePipeline {
             }
 
             // Check if this provider already has a copy via deduplication registry
-            let existing_content_id = self.dedup_registry
+            let existing_content_id = self
+                .dedup_registry
                 .lookup(&canonical_hash, name)
                 .unwrap_or(None);
 
@@ -244,7 +245,11 @@ impl ArchivePipeline {
                             m.retrieval_latency_sum_ms += elapsed;
                             m.retrieval_count += 1;
                             if let Some(ref collector) = self.metrics_collector {
-                                collector.record_retrieval(&provider_receipt.provider, true, elapsed);
+                                collector.record_retrieval(
+                                    &provider_receipt.provider,
+                                    true,
+                                    elapsed,
+                                );
                             }
                             return Ok(data);
                         } else {
@@ -275,12 +280,7 @@ impl ArchivePipeline {
     ///
     /// Returns `true` if data should be retained. If no policies match the
     /// artifact class, retention defaults to `true` (keep).
-    pub fn check_retention(
-        &self,
-        artifact_class: &str,
-        age_secs: u64,
-        quality_score: f64,
-    ) -> bool {
+    pub fn check_retention(&self, artifact_class: &str, age_secs: u64, quality_score: f64) -> bool {
         let matching: Vec<_> = self
             .retention_policies
             .iter()
@@ -298,7 +298,10 @@ impl ArchivePipeline {
 
     /// Get a snapshot of current metrics.
     pub fn metrics(&self) -> ArchiveMetrics {
-        self.metrics.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.metrics
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Set a provenance policy, enabling provenance-gated archiving.
@@ -334,16 +337,14 @@ impl ArchivePipeline {
 
         match decision {
             AdmissionDecision::Accepted => {
-                let validation_result = provenance
-                    .map(|c| validator.validate_chain(c));
+                let validation_result = provenance.map(|c| validator.validate_chain(c));
                 let mut receipt = self.archive(data, metadata).await?;
                 receipt.provenance_result = validation_result;
                 receipt.admission_decision = Some(AdmissionDecision::Accepted);
                 Ok((AdmissionDecision::Accepted, Some(receipt)))
             }
             AdmissionDecision::Quarantined => {
-                let validation_result = provenance
-                    .map(|c| validator.validate_chain(c));
+                let validation_result = provenance.map(|c| validator.validate_chain(c));
                 let now_ts = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
@@ -361,7 +362,10 @@ impl ArchivePipeline {
                     reinstated: false,
                 };
                 {
-                    let mut log = self.quarantine_log.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut log = self
+                        .quarantine_log
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
                     log.push(record);
                 }
                 // Still store, but flagged
@@ -406,7 +410,8 @@ mod tests {
         }
 
         fn store_call_count(&self) -> u64 {
-            self.store_call_count.load(std::sync::atomic::Ordering::Relaxed)
+            self.store_call_count
+                .load(std::sync::atomic::Ordering::Relaxed)
         }
     }
 
@@ -417,7 +422,8 @@ mod tests {
             data: &[u8],
             _metadata: &Metadata,
         ) -> Result<ContentId, StorageError> {
-            self.store_call_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.store_call_count
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let ipfs_cid = wrfcoin_storage_common::ipfs_content_id(data);
             self.data
                 .lock()
@@ -448,7 +454,9 @@ mod tests {
             Ok(())
         }
 
-        async fn health_check(&self) -> Result<wrfcoin_storage_common::types::HealthStatus, StorageError> {
+        async fn health_check(
+            &self,
+        ) -> Result<wrfcoin_storage_common::types::HealthStatus, StorageError> {
             Ok(wrfcoin_storage_common::types::HealthStatus {
                 healthy: true,
                 provider: "mock".to_string(),
@@ -495,8 +503,10 @@ mod tests {
         assert_eq!(mock_provider.store_call_count(), 1);
 
         // Both receipts should have the same ContentId
-        assert_eq!(result1.unwrap().provider_receipts[0].content_id,
-                   result2.unwrap().provider_receipts[0].content_id);
+        assert_eq!(
+            result1.unwrap().provider_receipts[0].content_id,
+            result2.unwrap().provider_receipts[0].content_id
+        );
     }
 
     #[tokio::test]
@@ -523,8 +533,10 @@ mod tests {
         assert_eq!(mock_provider.store_call_count(), 2);
 
         // Different data should produce different ContentIds
-        assert_ne!(result1.unwrap().provider_receipts[0].content_id,
-                   result2.unwrap().provider_receipts[0].content_id);
+        assert_ne!(
+            result1.unwrap().provider_receipts[0].content_id,
+            result2.unwrap().provider_receipts[0].content_id
+        );
     }
 
     #[tokio::test]
@@ -533,7 +545,10 @@ mod tests {
         let ipfs_provider = Arc::new(MockStorageProvider::new("ipfs"));
         let filecoin_provider = Arc::new(MockStorageProvider::new("filecoin"));
         pipeline.add_provider("ipfs", ipfs_provider.clone() as Arc<dyn StorageProvider>);
-        pipeline.add_provider("filecoin", filecoin_provider.clone() as Arc<dyn StorageProvider>);
+        pipeline.add_provider(
+            "filecoin",
+            filecoin_provider.clone() as Arc<dyn StorageProvider>,
+        );
 
         let test_data = b"weather observation data";
         let metadata = Metadata {
@@ -622,4 +637,3 @@ mod tests {
         assert_eq!(retrieved.unwrap(), test_data);
     }
 }
-

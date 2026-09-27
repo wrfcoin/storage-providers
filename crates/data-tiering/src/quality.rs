@@ -154,12 +154,14 @@ impl QualityRetentionManager {
 
     /// Replace or insert a retention policy for the trust class it targets.
     pub fn set_retention_policy(&mut self, policy: QualityRetentionPolicy) {
-        self.retention_policies.insert(policy.trust_class.clone(), policy);
+        self.retention_policies
+            .insert(policy.trust_class.clone(), policy);
     }
 
     /// Replace or insert an access-control policy for the trust class it targets.
     pub fn set_access_policy(&mut self, policy: AccessControlPolicy) {
-        self.access_policies.insert(policy.trust_class.clone(), policy);
+        self.access_policies
+            .insert(policy.trust_class.clone(), policy);
     }
 
     /// Suggest the storage tier for content from `trust_class` that is
@@ -201,7 +203,10 @@ impl QualityRetentionManager {
     }
 
     /// Look up the retention policy for `trust_class`.
-    pub fn get_retention_policy(&self, trust_class: &TrustClass) -> Option<&QualityRetentionPolicy> {
+    pub fn get_retention_policy(
+        &self,
+        trust_class: &TrustClass,
+    ) -> Option<&QualityRetentionPolicy> {
         self.retention_policies.get(trust_class)
     }
 
@@ -232,8 +237,14 @@ mod tests {
             TrustClass::Probation,
             TrustClass::Untrusted,
         ] {
-            assert!(mgr.get_retention_policy(&tc).is_some(), "missing retention policy for {tc:?}");
-            assert!(mgr.get_access_policy(&tc).is_some(), "missing access policy for {tc:?}");
+            assert!(
+                mgr.get_retention_policy(&tc).is_some(),
+                "missing retention policy for {tc:?}"
+            );
+            assert!(
+                mgr.get_access_policy(&tc).is_some(),
+                "missing access policy for {tc:?}"
+            );
         }
     }
 
@@ -313,9 +324,15 @@ mod tests {
     #[test]
     fn test_suggested_tier_verified_older_data_is_warm() {
         let mgr = QualityRetentionManager::new();
-        let hot_hours = mgr.get_retention_policy(&TrustClass::Verified).unwrap().hot_retention_hours;
+        let hot_hours = mgr
+            .get_retention_policy(&TrustClass::Verified)
+            .unwrap()
+            .hot_retention_hours;
         // Just past the Hot window → should go to Warm.
-        assert_eq!(mgr.suggested_tier(&TrustClass::Verified, hot_hours + 1), DataTier::Warm);
+        assert_eq!(
+            mgr.suggested_tier(&TrustClass::Verified, hot_hours + 1),
+            DataTier::Warm
+        );
     }
 
     #[test]
@@ -337,15 +354,24 @@ mod tests {
         let p = mgr.get_retention_policy(&TrustClass::Probation).unwrap();
         // Past both Hot and Warm windows → Cold.
         let age = p.warm_retention_hours + 1;
-        assert_eq!(mgr.suggested_tier(&TrustClass::Probation, age), DataTier::Cold);
+        assert_eq!(
+            mgr.suggested_tier(&TrustClass::Probation, age),
+            DataTier::Cold
+        );
     }
 
     #[test]
     fn test_suggested_tier_untrusted_always_archive() {
         let mgr = QualityRetentionManager::new();
         // Untrusted has 0 for Hot, Warm, Cold retention → always Archive.
-        assert_eq!(mgr.suggested_tier(&TrustClass::Untrusted, 0), DataTier::Archive);
-        assert_eq!(mgr.suggested_tier(&TrustClass::Untrusted, 10_000), DataTier::Archive);
+        assert_eq!(
+            mgr.suggested_tier(&TrustClass::Untrusted, 0),
+            DataTier::Archive
+        );
+        assert_eq!(
+            mgr.suggested_tier(&TrustClass::Untrusted, 10_000),
+            DataTier::Archive
+        );
     }
 
     #[test]
@@ -353,8 +379,14 @@ mod tests {
         let mgr = QualityRetentionManager::new();
         // 100 years in hours — should always be Archive.
         let very_old = 100 * 365 * 24;
-        assert_eq!(mgr.suggested_tier(&TrustClass::Verified, very_old), DataTier::Archive);
-        assert_eq!(mgr.suggested_tier(&TrustClass::Standard, very_old), DataTier::Archive);
+        assert_eq!(
+            mgr.suggested_tier(&TrustClass::Verified, very_old),
+            DataTier::Archive
+        );
+        assert_eq!(
+            mgr.suggested_tier(&TrustClass::Standard, very_old),
+            DataTier::Archive
+        );
     }
 
     // ---- Access control per trust class ----
@@ -396,7 +428,10 @@ mod tests {
     fn test_suggested_tier_unknown_trust_class_returns_archive() {
         let mut mgr = QualityRetentionManager::new();
         mgr.retention_policies.clear();
-        assert_eq!(mgr.suggested_tier(&TrustClass::Verified, 0), DataTier::Archive);
+        assert_eq!(
+            mgr.suggested_tier(&TrustClass::Verified, 0),
+            DataTier::Archive
+        );
     }
 
     #[test]

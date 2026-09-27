@@ -166,11 +166,7 @@ impl AdaptiveChunker {
     ///
     /// Uses simple size-based chunking: splits data into fixed-size chunks.
     /// For content-defined chunking, use content hash of each chunk.
-    pub fn chunk(
-        &self,
-        data: &[u8],
-        content_type: &str,
-    ) -> Result<ChunkManifest, String> {
+    pub fn chunk(&self, data: &[u8], content_type: &str) -> Result<ChunkManifest, String> {
         use crate::integrity::IntegrityVerifier;
 
         if data.is_empty() {
@@ -211,7 +207,11 @@ impl AdaptiveChunker {
     /// # Returns
     ///
     /// Reconstructed original data.
-    pub fn reconstruct(&self, manifest: &ChunkManifest, chunks: &[Vec<u8>]) -> Result<Vec<u8>, String> {
+    pub fn reconstruct(
+        &self,
+        manifest: &ChunkManifest,
+        chunks: &[Vec<u8>],
+    ) -> Result<Vec<u8>, String> {
         if chunks.len() != manifest.chunk_hashes.len() {
             return Err(format!(
                 "chunk count mismatch: expected {}, got {}",
@@ -405,7 +405,10 @@ mod tests {
         let manifest = chunker.chunk(&data, "application/json+weather").unwrap();
 
         // Verify compression strategy
-        assert_eq!(manifest.compression, CompressionStrategy::DeltaZstd { level: 6 });
+        assert_eq!(
+            manifest.compression,
+            CompressionStrategy::DeltaZstd { level: 6 }
+        );
 
         // Split and reconstruct
         let mut chunks = Vec::new();
@@ -475,7 +478,7 @@ mod tests {
 
         // Try to reconstruct with wrong number of chunks
         let wrong_chunks = vec![data.to_vec()]; // Only 1 chunk, but manifest expects 1
-        // This should succeed since data is small
+                                                // This should succeed since data is small
         let _result = chunker.reconstruct(&manifest, &wrong_chunks);
         // Actually, let's fix this test by creating a larger dataset
     }

@@ -18,10 +18,17 @@ impl IntoResponse for ApiError {
                 "Storage capacity exceeded".to_string(),
             ),
             StorageError::InvalidData(ref msg) => (StatusCode::BAD_REQUEST, msg.clone()),
-            StorageError::Timeout => (StatusCode::GATEWAY_TIMEOUT, "Operation timed out".to_string()),
+            StorageError::Timeout => (
+                StatusCode::GATEWAY_TIMEOUT,
+                "Operation timed out".to_string(),
+            ),
             StorageError::CostExceeded(ref msg) => (StatusCode::PAYMENT_REQUIRED, msg.clone()),
-            StorageError::ConnectionFailed(ref msg) => (StatusCode::SERVICE_UNAVAILABLE, msg.clone()),
-            StorageError::ProviderError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
+            StorageError::ConnectionFailed(ref msg) => {
+                (StatusCode::SERVICE_UNAVAILABLE, msg.clone())
+            }
+            StorageError::ProviderError(ref msg) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, msg.clone())
+            }
             StorageError::Internal(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
             StorageError::ConfigError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
         };

@@ -337,7 +337,11 @@ async fn test_health_aggregation() {
     assert_eq!(result.total_count, 2);
 
     // Verify individual entries.
-    let healthy_entry = result.providers.iter().find(|e| e.name == "healthy").unwrap();
+    let healthy_entry = result
+        .providers
+        .iter()
+        .find(|e| e.name == "healthy")
+        .unwrap();
     assert!(healthy_entry.status.as_ref().unwrap().healthy);
 
     let sick_entry = result.providers.iter().find(|e| e.name == "sick").unwrap();

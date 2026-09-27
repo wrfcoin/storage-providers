@@ -387,7 +387,10 @@ async fn test_archive_with_provenance_valid() {
 
     assert_eq!(decision, AdmissionDecision::Accepted);
     let receipt = receipt.expect("receipt should be present for accepted data");
-    assert_eq!(receipt.admission_decision, Some(AdmissionDecision::Accepted));
+    assert_eq!(
+        receipt.admission_decision,
+        Some(AdmissionDecision::Accepted)
+    );
     assert!(receipt.provenance_result.is_some());
     assert!(receipt.provenance_result.unwrap().valid);
 }
@@ -443,7 +446,10 @@ async fn test_archive_with_provenance_invalid_quarantined() {
 
     assert_eq!(decision, AdmissionDecision::Quarantined);
     let receipt = receipt.expect("quarantined data should still be stored");
-    assert_eq!(receipt.admission_decision, Some(AdmissionDecision::Quarantined));
+    assert_eq!(
+        receipt.admission_decision,
+        Some(AdmissionDecision::Quarantined)
+    );
 }
 
 #[tokio::test]

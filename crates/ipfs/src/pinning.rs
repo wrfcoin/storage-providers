@@ -80,12 +80,15 @@ impl PinManager {
     pub fn record_pin_tracked(&mut self, cid: String, size: u64) {
         let now = Instant::now();
         self.total_pinned_bytes += size;
-        self.pins.insert(cid.clone(), PinMetadata {
-            cid,
-            size_bytes: size,
-            pinned_at: now,
-            last_accessed: now,
-        });
+        self.pins.insert(
+            cid.clone(),
+            PinMetadata {
+                cid,
+                size_bytes: size,
+                pinned_at: now,
+                last_accessed: now,
+            },
+        );
     }
 
     /// Mark a pin as recently accessed.
@@ -156,7 +159,7 @@ mod tests {
         assert!(pm.should_pin(500, 0));
         pm.record_pin(800);
         assert!(!pm.should_pin(500, 0)); // 800 + 500 > 1000
-        assert!(pm.should_pin(200, 0));  // 800 + 200 = 1000
+        assert!(pm.should_pin(200, 0)); // 800 + 200 = 1000
     }
 
     #[test]
@@ -165,7 +168,7 @@ mod tests {
         // Needs > 2 accesses AND < 100 MiB
         assert!(!pm.should_pin(100, 0)); // too few accesses
         assert!(!pm.should_pin(100, 2)); // exactly 2, need > 2
-        assert!(pm.should_pin(100, 3));  // good
+        assert!(pm.should_pin(100, 3)); // good
         assert!(!pm.should_pin(200 * 1024 * 1024, 5)); // too large
     }
 

@@ -148,8 +148,7 @@ impl StorageProvider for ArweaveStorageProvider {
                 inner.stats.cache_hits += 1;
                 // Decompress if the stored data has gzip magic bytes.
                 if wrfcoin_storage_common::compression::is_compressed(&bytes) {
-                    let decompressed =
-                        wrfcoin_storage_common::compression::decompress(&bytes)?;
+                    let decompressed = wrfcoin_storage_common::compression::decompress(&bytes)?;
                     Ok(decompressed)
                 } else {
                     Ok(bytes)
