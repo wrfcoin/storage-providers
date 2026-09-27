@@ -129,8 +129,7 @@ impl AppState {
                 }
                 other => {
                     return Err(StorageError::ConfigError(format!(
-                        "Unknown provider: {}",
-                        other
+                        "Unknown provider: {other}"
                     )))
                 }
             }
@@ -144,8 +143,7 @@ impl AppState {
 
         if !providers.contains_key(&default_provider) {
             return Err(StorageError::ConfigError(format!(
-                "Default provider '{}' not in configured providers",
-                default_provider
+                "Default provider '{default_provider}' not in configured providers"
             )));
         }
 
@@ -218,7 +216,7 @@ impl AppState {
         self.providers
             .get(name)
             .map(|b| b.as_ref())
-            .ok_or_else(|| StorageError::ConfigError(format!("Provider '{}' not found", name)))
+            .ok_or_else(|| StorageError::ConfigError(format!("Provider '{name}' not found")))
     }
 
     /// Get the default provider name.

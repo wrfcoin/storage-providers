@@ -165,7 +165,7 @@ mod tests {
     fn test_smart_strategy_count() {
         let mut b = DataBundler::new(BundlingStrategy::Smart);
         for i in 0..10 {
-            b.add_item(item(&format!("{}", i), b"x", 0));
+            b.add_item(item(&format!("{i}"), b"x", 0));
         }
         assert!(b.should_flush(0)); // 10 items
     }

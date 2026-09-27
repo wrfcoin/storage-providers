@@ -214,8 +214,7 @@ fn log_report(report: &EnforcementReport) {
 
 fn tracing_log(items: usize, violations: usize) {
     eprintln!(
-        "[RetentionScheduler] enforcement run complete: {} items, {} violations",
-        items, violations
+        "[RetentionScheduler] enforcement run complete: {items} items, {violations} violations"
     );
 }
 

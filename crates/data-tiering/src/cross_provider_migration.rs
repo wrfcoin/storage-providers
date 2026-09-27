@@ -172,8 +172,7 @@ impl CrossProviderMigrator {
         // 4. Verify by re-retrieving and comparing hashes
         let migrated_data = dest.retrieve(&dest_cid).await.map_err(|e| {
             StorageError::ProviderError(format!(
-                "verification: failed to retrieve from destination: {:?}",
-                e
+                "verification: failed to retrieve from destination: {e:?}"
             ))
         })?;
 
@@ -185,8 +184,7 @@ impl CrossProviderMigrator {
         if !verified {
             let _ = dest.delete(&dest_cid).await;
             return Err(StorageError::InvalidData(format!(
-                "CID verification failed: {} != {}",
-                original_digest_hex, migrated_digest_hex
+                "CID verification failed: {original_digest_hex} != {migrated_digest_hex}"
             )));
         }
 
@@ -232,7 +230,7 @@ impl CrossProviderMigrator {
                     self.history.push((
                         request,
                         MigrationJobStatus::Failed,
-                        Some(format!("{:?}", e)),
+                        Some(format!("{e:?}")),
                     ));
                 }
             }
@@ -408,7 +406,12 @@ mod tests {
         // Retrieve from destination and verify content matches
         let dest_cid = wrfcoin_storage_common::ContentId {
             provider: "arweave".to_string(),
-            hash: result.migrated_cid.split(':').last().unwrap().to_string(),
+            hash: result
+                .migrated_cid
+                .split(':')
+                .next_back()
+                .unwrap()
+                .to_string(),
         };
         let retrieved = dest
             .retrieve(&dest_cid)
