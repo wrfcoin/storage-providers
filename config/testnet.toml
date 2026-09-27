@@ -1,0 +1,6 @@
+bind_addr = "0.0.0.0:7001"
+storage_tier = "hot"
+cache_ttl_secs = 3600
+
+[provider_endpoints]
+ipfs = "http://ipfs:5001"

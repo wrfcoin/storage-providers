@@ -2249,6 +2249,7 @@ dependencies = [
  "hex",
  "hyper",
  "prometheus",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror",

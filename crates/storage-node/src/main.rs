@@ -103,7 +103,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     registry.register(Box::new(requests_counter.clone()))?;
 
     // Initialize storage providers
-    let app_state = Arc::new(state::AppState::new().await?);
+    let app_state =
+        Arc::new(state::AppState::new(config.provider_endpoints.ipfs.as_deref()).await?);
 
     // Clone registry for metrics endpoint
     let registry_clone = registry.clone();
