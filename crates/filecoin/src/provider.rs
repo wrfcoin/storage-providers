@@ -97,10 +97,12 @@ impl StorageProvider for FilecoinStorageProvider {
 
     async fn health_check(&self) -> Result<HealthStatus, StorageError> {
         Ok(HealthStatus {
-            healthy: true,
+            healthy: false,
             provider: "filecoin".to_string(),
-            latency_ms: Some(50),
-            message: Some(format!("connected to {}", self.config.lotus_api_url)),
+            latency_ms: None,
+            message: Some(
+                "not configured: Lotus authentication is not implemented in this build".into(),
+            ),
         })
     }
 

@@ -71,3 +71,20 @@ async fn arweave_reads_still_work_against_mock_gateway() {
     assert_eq!(client.get_price(4).await.unwrap(), 42);
     assert_eq!(mock.requests(), 3);
 }
+
+#[tokio::test]
+async fn unconfigured_health_is_unhealthy_without_network_or_invented_latency() {
+    let mock = mock_http::MockHttp::new();
+    let provider = ArweaveStorageProvider::new(ArweaveConfig {
+        gateway_url: mock.url.clone(),
+        ..Default::default()
+    });
+    let health = provider.health_check().await.unwrap();
+    assert_eq!(mock.requests(), 0);
+    assert!(
+        !health.healthy,
+        "unconfigured provider fabricated healthy status"
+    );
+    assert_eq!(health.latency_ms, None);
+    assert!(health.message.unwrap().starts_with("not configured:"));
+}

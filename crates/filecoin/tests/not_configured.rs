@@ -74,3 +74,39 @@ async fn token_does_not_enable_unimplemented_auth_or_writes() {
         assert!(matches!(result, Err(StorageError::NotConfigured { .. })));
     }
 }
+
+#[tokio::test]
+async fn unconfigured_health_is_unhealthy_without_network_or_invented_latency() {
+    let mock = mock_http::MockHttp::new();
+    let provider = FilecoinStorageProvider::new(FilecoinConfig {
+        lotus_api_url: mock.url.clone(),
+        ..Default::default()
+    });
+    let health = provider.health_check().await.unwrap();
+    assert_eq!(mock.requests(), 0);
+    assert!(
+        !health.healthy,
+        "unconfigured provider fabricated healthy status"
+    );
+    assert_eq!(health.latency_ms, None);
+    assert!(health.message.unwrap().starts_with("not configured:"));
+}
+
+#[test]
+fn debug_keeps_nonsecret_configuration_and_redacts_token() {
+    let config = FilecoinConfig {
+        api_token: Some("dummy-secret".into()),
+        ..Default::default()
+    };
+    let debug = format!("{config:?}");
+    assert!(!debug.contains("dummy-secret"));
+    for field in [
+        "lotus_api_url",
+        "wallet_address",
+        "max_price_per_gib",
+        "deal_duration_epochs",
+        "verified_deals",
+    ] {
+        assert!(debug.contains(field), "missing non-secret field {field}");
+    }
+}
