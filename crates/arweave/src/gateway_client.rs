@@ -55,25 +55,11 @@ impl ArweaveGatewayClient {
         &self,
         payload: &TransactionPayload,
     ) -> Result<String, StorageError> {
-        let url = format!("{}/tx", self.gateway_url);
-        let resp = self
-            .client
-            .post(&url)
-            .json(payload)
-            .send()
-            .await
-            .map_err(|e| StorageError::ConnectionFailed(format!("submit_tx: {e}")))?;
-        if !resp.status().is_success() {
-            return Err(StorageError::ProviderError(format!(
-                "submit_tx: HTTP {}",
-                resp.status()
-            )));
-        }
-        let body = resp
-            .text()
-            .await
-            .map_err(|e| StorageError::ProviderError(format!("submit_tx read: {e}")))?;
-        Ok(body)
+        let _ = payload;
+        Err(StorageError::NotConfigured {
+            provider: "arweave",
+            reason: "no transaction signer in this build".into(),
+        })
     }
 
     /// Get transaction info via `GET /tx/{id}`.

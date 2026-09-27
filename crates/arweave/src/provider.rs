@@ -62,17 +62,6 @@ impl ArweaveStorageProvider {
         }
     }
 
-    /// Compute a content hash using SHA-256.
-    fn compute_hash(data: &[u8]) -> String {
-        wrfcoin_storage_common::hashing::arweave_content_id(data).hash
-    }
-
-    /// Estimate the cost in AR for storing the given number of bytes.
-    fn estimate_cost(size: u64) -> f64 {
-        // Rough estimate: ~0.0001 AR per KiB.
-        (size as f64 / 1024.0) * 0.0001
-    }
-
     /// Return a reference to the current configuration.
     pub fn config(&self) -> &ArweaveConfig {
         &self.config
@@ -81,49 +70,11 @@ impl ArweaveStorageProvider {
 
 #[async_trait]
 impl StorageProvider for ArweaveStorageProvider {
-    async fn store(&self, data: &[u8], metadata: &Metadata) -> Result<ContentId, StorageError> {
-        // Optionally compress data before storing.
-        let store_data = if self.config.compression_enabled {
-            wrfcoin_storage_common::compression::compress(data)?
-        } else {
-            data.to_vec()
-        };
-
-        let cost = Self::estimate_cost(store_data.len() as u64);
-        if cost > self.config.max_cost_ar {
-            return Err(StorageError::CostExceeded(format!(
-                "estimated cost {cost:.6} AR exceeds max {:.6} AR",
-                self.config.max_cost_ar
-            )));
-        }
-
-        // Hash the original uncompressed data for deterministic CIDs.
-        let hash = Self::compute_hash(data);
-        let content_id = ContentId {
-            provider: "arweave".to_string(),
-            hash: hash.clone(),
-        };
-
-        let transaction = ArweaveTransaction {
-            id: hash.clone(),
-            data_size: data.len() as u64,
-            cost,
-            timestamp: metadata.timestamp,
-            status: TransactionStatus::Pending,
-            tags: metadata.tags.clone(),
-        };
-
-        let mut inner = self
-            .inner
-            .lock()
-            .map_err(|e| StorageError::ProviderError(format!("lock poisoned: {e}")))?;
-
-        inner.transactions.insert(hash.clone(), transaction);
-        inner.cache.insert(hash, store_data);
-        inner.stats.total_stored += 1;
-        inner.stats.total_bytes += data.len() as u64;
-
-        Ok(content_id)
+    async fn store(&self, _data: &[u8], _metadata: &Metadata) -> Result<ContentId, StorageError> {
+        Err(StorageError::NotConfigured {
+            provider: "arweave",
+            reason: "no transaction signer in this build".into(),
+        })
     }
 
     async fn retrieve(&self, id: &ContentId) -> Result<Vec<u8>, StorageError> {
@@ -184,10 +135,12 @@ impl StorageProvider for ArweaveStorageProvider {
 
     async fn health_check(&self) -> Result<HealthStatus, StorageError> {
         Ok(HealthStatus {
-            healthy: true,
+            healthy: false,
             provider: "arweave".to_string(),
-            latency_ms: Some(200),
-            message: Some(format!("connected to {}", self.config.gateway_url)),
+            latency_ms: None,
+            message: Some(
+                "not configured: transaction signing is not implemented in this build".into(),
+            ),
         })
     }
 

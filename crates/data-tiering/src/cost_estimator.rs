@@ -192,7 +192,7 @@ impl StorageCostModel for FilecoinCostModel {
 /// for real-time pricing; otherwise the fallback `ar_per_kib` rate is used.
 #[derive(Debug, Clone)]
 pub struct ArweaveCostModel {
-    /// Fallback rate in AR per KiB (matches `ArweaveStorageProvider::estimate_cost`).
+    /// Illustrative fallback rate in AR per KiB; not a provider quote.
     pub ar_per_kib: f64,
     /// Pre-fetched gateway price in winston. Overrides `ar_per_kib` when `Some`.
     pub gateway_winston: Option<u64>,

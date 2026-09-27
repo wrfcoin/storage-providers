@@ -6,6 +6,12 @@ pub enum StorageError {
     /// Provider excluded from the zero-budget testnet profile.
     #[error("{provider}: not in this testnet")]
     NotInTestnet { provider: String },
+    /// The provider cannot perform writes in this build.
+    #[error("{provider} not configured: {reason}")]
+    NotConfigured {
+        provider: &'static str,
+        reason: String,
+    },
 
     /// Failed to connect to the storage backend.
     #[error("connection failed: {0}")]
