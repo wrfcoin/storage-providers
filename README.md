@@ -3,7 +3,7 @@
 [![Rust 1.70+](https://img.shields.io/badge/Rust-1.70%2B-000000?logo=rust)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-Storage clients and tiering libraries for WRFCoin. The default storage-node testnet profile enables only a self-hosted Kubo/IPFS node. Filecoin and Arweave are not in this testnet.
+Storage clients and tiering libraries for WRFCoin. The default storage-node testnet profile enables only a self-hosted Kubo/IPFS node. Filecoin and Arweave are not in this testnet. Incomplete paid-provider writes fail closed.
 
 ## 🏗 Architecture
 
@@ -13,8 +13,8 @@ The storage ecosystem is designed as a modular Rust workspace, ensuring type-saf
 
 - **`storage-common`**: The foundation of the workspace. Defines the core `StorageProvider` and `ContentAddressed` traits, shared types (EnvironmentalReport, Metadata), error handling, and cryptographic integrity verification.
 - **`ipfs`**: Hot/Warm storage provider. Handles rapid ingestion and retrieval of weather data blobs using Content Identifiers (CIDs).
-- **`filecoin`**: Incomplete client; not in this testnet.
-- **`arweave`**: Incomplete client; not in this testnet.
+- **`filecoin`**: Incomplete client — read-only / not in this testnet. Lotus authenticated writes are not implemented.
+- **`arweave`**: Incomplete client — read-only / not in this testnet. Transaction signing is not implemented.
 - **`data-tiering`**: The orchestrator. Implements intelligent migration of data between tiers based on age, frequency of access, and provenance policies.
 
 ## 📡 Data Tiering Model
@@ -23,8 +23,8 @@ The storage ecosystem is designed as a modular Rust workspace, ensuring type-saf
 |------|----------|----------------|------------------|
 | **Hot** | Local Cache / Redis | < 100ms | Real-time weather observations |
 | **Warm** | IPFS | < 5s | Active datasets and peer-to-peer sharing |
-| **Cold** | Filecoin | Unavailable | Not in this testnet |
-| **Archive** | Arweave | Unavailable | Not in this testnet |
+| **Cold** | Filecoin | Unavailable | Client incomplete — read-only / not in this testnet |
+| **Archive** | Arweave | Unavailable | Client incomplete — read-only / not in this testnet |
 
 ## 🛡 Advanced Features
 
@@ -120,3 +120,16 @@ uses locked Cargo dependencies and a distroless non-root runtime. Building does
 not deploy or push the image. Test the actual daemon without live services:
 `cargo test -p wrfcoin-storage-node --test ipfs_only_profile` (seven loopback tests).
 The repository has no CT102 runner; report these tests as local evidence.
+
+## Deferred (needs funded wallets)
+
+- Lotus Bearer authentication in `crates/filecoin/src/rpc_client.rs::rpc_call`.
+  Setting the reserved `api_token` field does not enable writes in this build.
+  Filecoin provider store/delete and administrative `Filecoin.Client*` RPC calls
+  return `NotConfigured` without network traffic.
+- Arweave JWK RSA-PSS signing in a future `crates/arweave/src/signer.rs`.
+  Provider store and gateway submit_transaction return `NotConfigured`;
+  gateway get_data, get_transaction and get_price remain available.
+
+The storage-node API maps these errors to HTTP 501. No wallet or token is needed
+for local regression tests; HTTP tests use loopback mocks only.
