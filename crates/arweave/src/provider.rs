@@ -135,10 +135,12 @@ impl StorageProvider for ArweaveStorageProvider {
 
     async fn health_check(&self) -> Result<HealthStatus, StorageError> {
         Ok(HealthStatus {
-            healthy: true,
+            healthy: false,
             provider: "arweave".to_string(),
-            latency_ms: Some(200),
-            message: Some(format!("connected to {}", self.config.gateway_url)),
+            latency_ms: None,
+            message: Some(
+                "not configured: transaction signing is not implemented in this build".into(),
+            ),
         })
     }
 

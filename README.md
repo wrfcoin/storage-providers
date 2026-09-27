@@ -13,7 +13,7 @@ The storage ecosystem is designed as a modular Rust workspace, ensuring type-saf
 
 - **`storage-common`**: The foundation of the workspace. Defines the core `StorageProvider` and `ContentAddressed` traits, shared types (EnvironmentalReport, Metadata), error handling, and cryptographic integrity verification.
 - **`ipfs`**: Hot/Warm storage provider. Handles rapid ingestion and retrieval of weather data blobs using Content Identifiers (CIDs).
-- **`filecoin`**: Incomplete client — read-only / not in this testnet. Lotus authenticated writes are not implemented.
+- **`filecoin`**: Disabled (no working read or write path) / not in this testnet. Lotus authenticated writes are not implemented.
 - **`arweave`**: Incomplete client — read-only / not in this testnet. Transaction signing is not implemented.
 - **`data-tiering`**: The orchestrator. Implements intelligent migration of data between tiers based on age, frequency of access, and provenance policies.
 
@@ -23,7 +23,7 @@ The storage ecosystem is designed as a modular Rust workspace, ensuring type-saf
 |------|----------|----------------|------------------|
 | **Hot** | Local Cache / Redis | < 100ms | Real-time weather observations |
 | **Warm** | IPFS | < 5s | Active datasets and peer-to-peer sharing |
-| **Cold** | Filecoin | Unavailable | Client incomplete — read-only / not in this testnet |
+| **Cold** | Filecoin | Unavailable | Disabled (no working read or write path) / not in this testnet |
 | **Archive** | Arweave | Unavailable | Client incomplete — read-only / not in this testnet |
 
 ## 🛡 Advanced Features

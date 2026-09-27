@@ -34,7 +34,12 @@ impl Default for FilecoinConfig {
 impl std::fmt::Debug for FilecoinConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FilecoinConfig")
+            .field("lotus_api_url", &self.lotus_api_url)
             .field("api_token", &"[REDACTED]")
-            .finish_non_exhaustive()
+            .field("wallet_address", &self.wallet_address)
+            .field("max_price_per_gib", &self.max_price_per_gib)
+            .field("deal_duration_epochs", &self.deal_duration_epochs)
+            .field("verified_deals", &self.verified_deals)
+            .finish()
     }
 }
