@@ -73,6 +73,12 @@ impl LotusClient {
 
     /// Make a generic JSON-RPC 2.0 call.
     pub async fn rpc_call(&self, method: &str, params: Value) -> Result<Value, StorageError> {
+        if method.starts_with("Filecoin.Client") {
+            return Err(StorageError::NotConfigured {
+                provider: "filecoin",
+                reason: "Lotus authentication is not implemented in this build".into(),
+            });
+        }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
