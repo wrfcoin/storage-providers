@@ -18,7 +18,7 @@ filecoin = "http://localhost:1234"
 
     // The config should be loadable with the env var
     let output = Command::new("cargo")
-        .args(&["build", "--release"])
+        .args(["build", "--release"])
         .env("STORAGE_NODE_CONFIG", "test-storage-node-config.toml")
         .output()
         .expect("Failed to build storage-node");
@@ -40,7 +40,7 @@ fn test_storage_node_graceful_shutdown() {
     //
     // For now, we test that the binary compiles without issues.
     let output = Command::new("cargo")
-        .args(&["build", "--release", "-p", "wrfcoin-storage-node"])
+        .args(["build", "--release", "-p", "wrfcoin-storage-node"])
         .output()
         .expect("Failed to build");
 
@@ -62,7 +62,7 @@ fn test_storage_node_metrics_endpoint() {
     // 4. Send SIGTERM and verify graceful shutdown
 
     let output = Command::new("cargo")
-        .args(&["check", "-p", "wrfcoin-storage-node"])
+        .args(["check", "-p", "wrfcoin-storage-node"])
         .output()
         .expect("Failed to check storage-node");
 

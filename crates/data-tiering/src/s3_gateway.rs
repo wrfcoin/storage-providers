@@ -216,16 +216,16 @@ pub enum S3GatewayError {
 impl std::fmt::Display for S3GatewayError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            S3GatewayError::BucketNotFound { bucket } => write!(f, "Bucket not found: {}", bucket),
+            S3GatewayError::BucketNotFound { bucket } => write!(f, "Bucket not found: {bucket}"),
             S3GatewayError::ObjectNotFound { bucket, key } => {
-                write!(f, "Object not found: s3://{}/{}", bucket, key)
+                write!(f, "Object not found: s3://{bucket}/{key}")
             }
             S3GatewayError::InvalidContentId { reason } => {
-                write!(f, "Invalid content ID: {}", reason)
+                write!(f, "Invalid content ID: {reason}")
             }
-            S3GatewayError::StorageError { reason } => write!(f, "Storage error: {}", reason),
-            S3GatewayError::AuthenticationError { reason } => write!(f, "Auth error: {}", reason),
-            S3GatewayError::InvalidRequest { reason } => write!(f, "Invalid request: {}", reason),
+            S3GatewayError::StorageError { reason } => write!(f, "Storage error: {reason}"),
+            S3GatewayError::AuthenticationError { reason } => write!(f, "Auth error: {reason}"),
+            S3GatewayError::InvalidRequest { reason } => write!(f, "Invalid request: {reason}"),
         }
     }
 }
@@ -620,7 +620,7 @@ mod tests {
         let head_resp = gateway.head_object(&head_req).unwrap();
         assert!(head_resp.exists);
         assert_eq!(head_resp.content_length, Some(9));
-        assert!(!head_resp.etag.is_none());
+        assert!(head_resp.etag.is_some());
     }
 
     #[test]
@@ -661,8 +661,8 @@ mod tests {
         for i in 0..5 {
             let put_req = PutObjectRequest {
                 bucket: "wrfcoin-hot".to_string(),
-                key: format!("data/file{}.json", i),
-                data: format!("content {}", i).into_bytes(),
+                key: format!("data/file{i}.json"),
+                data: format!("content {i}").into_bytes(),
                 content_type: "application/json".to_string(),
             };
             gateway.put_object(&put_req).unwrap();

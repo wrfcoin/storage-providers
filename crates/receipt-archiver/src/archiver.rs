@@ -89,7 +89,7 @@ pub async fn archive_receipt(
         size: canonical_bytes.len() as u64,
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|e| ArchiveError::CidError(format!("timestamp error: {}", e)))?
+            .map_err(|e| ArchiveError::CidError(format!("timestamp error: {e}")))?
             .as_secs(),
         tags: {
             let mut tags = std::collections::HashMap::new();
@@ -108,7 +108,7 @@ pub async fn archive_receipt(
     let cid = provider
         .store(&canonical_bytes, &metadata)
         .await
-        .map_err(|e| ArchiveError::StorageError(format!("{:?}", e)))?;
+        .map_err(|e| ArchiveError::StorageError(format!("{e:?}")))?;
 
     // 4. Note: Arweave transaction ID would be returned if a dedicated Arweave
     // integration were implemented. For now, this returns None.

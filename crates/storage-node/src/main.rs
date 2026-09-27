@@ -13,7 +13,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
-use tracing_subscriber;
 
 /// Configuration for storage node from TOML file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,7 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize Prometheus metrics
     let registry = Arc::new(Registry::new());
     let requests_counter = Counter::new("storage_node_requests_total", "Total requests handled")
-        .map_err(|e| format!("Failed to create counter: {}", e))?;
+        .map_err(|e| format!("Failed to create counter: {e}"))?;
     registry.register(Box::new(requests_counter.clone()))?;
 
     // Initialize storage providers

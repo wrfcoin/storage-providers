@@ -53,8 +53,7 @@ mod tests {
         let z_pos = canonical_str.find("\"z\"").unwrap();
         assert!(
             a_pos < m_pos && m_pos < z_pos,
-            "keys must be sorted: {}",
-            canonical_str
+            "keys must be sorted: {canonical_str}"
         );
     }
 }
