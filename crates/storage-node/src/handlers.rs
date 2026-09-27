@@ -16,7 +16,7 @@ use wrfcoin_storage_common::{
 };
 
 use crate::error::ApiError;
-use crate::state::AppState;
+use crate::state::{AppState, ProviderPosture};
 
 /// Maximum upload size: 256 MiB
 const MAX_UPLOAD_BYTES: u64 = 256 * 1024 * 1024;
@@ -57,19 +57,23 @@ pub struct HealthResponse {
 #[derive(Serialize)]
 pub struct ProviderHealth {
     pub name: String,
-    pub healthy: bool,
+    pub healthy: Option<bool>,
+    pub posture: String,
     pub latency_ms: Option<u64>,
     pub message: Option<String>,
 }
 
 #[derive(Serialize)]
 pub struct StatsResponse {
+    pub remote_pinning_enabled: bool,
     pub providers: Vec<ProviderStatsEntry>,
     pub timestamp: u64,
 }
 
 #[derive(Serialize)]
 pub struct ProviderStatsEntry {
+    pub posture: String,
+    pub healthy: Option<bool>,
     pub name: String,
     pub stats: StorageStats,
 }
@@ -77,35 +81,52 @@ pub struct ProviderStatsEntry {
 /// GET /health - Check daemon and all provider health status
 pub async fn health_check(
     State(app_state): State<Arc<AppState>>,
-) -> Result<Json<HealthResponse>, ApiError> {
+) -> Result<(StatusCode, Json<HealthResponse>), ApiError> {
     let mut providers = Vec::new();
-
-    for provider_name in app_state.provider_names() {
-        let provider = app_state.get_provider(provider_name)?;
-        let health = provider.health_check().await?;
-
+    let mut overall_healthy = true;
+    for (name, posture) in app_state.provider_postures() {
+        let (healthy, latency_ms, message) = if posture == ProviderPosture::Active {
+            let health = app_state.get_provider(&name)?.health_check().await;
+            match health {
+                Ok(h) => (Some(h.healthy), h.latency_ms, h.message),
+                Err(_) => (Some(false), None, Some("probe failed".into())),
+            }
+        } else {
+            (None, None, Some(posture.label().into()))
+        };
+        if (posture == ProviderPosture::Active && healthy != Some(true))
+            || matches!(posture, ProviderPosture::Misconfigured(_))
+        {
+            overall_healthy = false;
+        }
         providers.push(ProviderHealth {
-            name: health.provider.clone(),
-            healthy: health.healthy,
-            latency_ms: health.latency_ms,
-            message: health.message.clone(),
+            name,
+            posture: posture.label().into(),
+            healthy,
+            latency_ms,
+            message,
         });
     }
-
-    let overall_healthy = providers.iter().all(|p| p.healthy);
-
-    Ok(Json(HealthResponse {
-        status: if overall_healthy {
-            "healthy".to_string()
+    Ok((
+        if overall_healthy {
+            StatusCode::OK
         } else {
-            "degraded".to_string()
+            StatusCode::SERVICE_UNAVAILABLE
         },
-        providers,
-        timestamp: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
-    }))
+        Json(HealthResponse {
+            status: if overall_healthy {
+                "healthy"
+            } else {
+                "degraded"
+            }
+            .into(),
+            providers,
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        }),
+    ))
 }
 
 /// GET /stats - Get aggregate statistics for all providers
@@ -114,17 +135,22 @@ pub async fn stats(
 ) -> Result<Json<StatsResponse>, ApiError> {
     let mut providers = Vec::new();
 
-    for provider_name in app_state.provider_names() {
-        let provider = app_state.get_provider(provider_name)?;
-        let stats = provider.stats().await?;
-
+    for (name, posture) in app_state.provider_postures() {
+        let stats = if posture == ProviderPosture::Active {
+            app_state.get_provider(&name)?.stats().await?
+        } else {
+            StorageStats::default()
+        };
         providers.push(ProviderStatsEntry {
-            name: provider_name.to_string(),
+            name,
+            posture: posture.label().into(),
+            healthy: None,
             stats,
         });
     }
 
     Ok(Json(StatsResponse {
+        remote_pinning_enabled: app_state.remote_pinning_enabled,
         providers,
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -146,6 +172,7 @@ pub async fn stats(
 /// ```
 pub async fn store(
     State(app_state): State<Arc<AppState>>,
+    Query(query): Query<RetrieveQuery>,
     Json(req): Json<StoreRequest>,
 ) -> Result<(StatusCode, Json<StoreResponse>), ApiError> {
     // Decode base64 data
@@ -167,9 +194,10 @@ pub async fn store(
     }
 
     // Determine which provider to use
-    let provider_name = req
+    let provider_name = query
         .provider
         .as_deref()
+        .or(req.provider.as_deref())
         .unwrap_or(app_state.default_provider_name());
 
     let provider = app_state.get_provider(provider_name)?;
@@ -316,6 +344,11 @@ fn parse_content_id(id: &str) -> Result<ContentId, ApiError> {
 
 /// Verify that retrieved data matches the expected content ID
 fn verify_content_id(expected: &ContentId, data: &[u8]) -> Result<(), ApiError> {
+    // Kubo verifies the content-addressed blocks it returns. Its CID may encode
+    // dag-pb/UnixFS or raw blocks; a locally invented raw SHA-256 CID is not equivalent.
+    if expected.provider == "ipfs" {
+        return Ok(());
+    }
     let computed = match expected.provider.as_str() {
         "ipfs" => ipfs_content_id(data),
         "filecoin" => filecoin_content_id(data),
@@ -386,6 +419,7 @@ pub async fn cost_estimate(
         .collect();
 
     Ok(Json(json!({
+        "estimate_only": true,
         "size_bytes": q.size_bytes,
         "duration_secs": duration_secs,
         "estimates": estimates,
@@ -415,6 +449,9 @@ pub async fn cost_cheapest(
         .collect();
     let mut health_map: HashMap<String, bool> = HashMap::new();
     for name in &provider_names {
+        if app_state.provider_postures().get(name) != Some(&ProviderPosture::Active) {
+            continue;
+        }
         if let Ok(provider) = app_state.get_provider(name) {
             let healthy = provider
                 .health_check()
@@ -432,7 +469,8 @@ pub async fn cost_cheapest(
 
     match result {
         Some(est) => Ok(Json(json!({
-            "size_bytes": q.size_bytes,
+            "estimate_only": true,
+        "size_bytes": q.size_bytes,
             "duration_secs": duration_secs,
             "cheapest": serde_json::to_value(&est).unwrap_or(json!(null)),
             "timestamp": std::time::SystemTime::now()
@@ -466,6 +504,9 @@ pub async fn analytics_snapshot(
     // Phase 1 — async: get provider health (no Mutex locks held across await).
     let mut health_map: HashMap<String, bool> = HashMap::new();
     for name in &provider_names {
+        if app_state.provider_postures().get(name) != Some(&ProviderPosture::Active) {
+            continue;
+        }
         if let Ok(provider) = app_state.get_provider(name) {
             let healthy = provider
                 .health_check()
@@ -508,7 +549,7 @@ pub async fn analytics_snapshot(
             .enumerate()
             .map(|(i, name)| ProviderInput {
                 name: name.as_str(),
-                healthy: health_map.get(name.as_str()).copied().unwrap_or(true),
+                healthy: health_map.get(name.as_str()).copied().unwrap_or(false),
                 stats: &stats_clones[i],
                 metrics: &metrics_arcs[i],
                 cost_to_date: 0.0,

@@ -3,6 +3,10 @@ use thiserror::Error;
 /// Unified error type for all storage provider operations.
 #[derive(Debug, Error)]
 pub enum StorageError {
+    /// Provider excluded from the zero-budget testnet profile.
+    #[error("{provider}: not in this testnet")]
+    NotInTestnet { provider: String },
+
     /// Failed to connect to the storage backend.
     #[error("connection failed: {0}")]
     ConnectionFailed(String),

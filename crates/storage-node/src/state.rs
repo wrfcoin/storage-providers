@@ -1,10 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::sync::{Arc, Mutex};
 use wrfcoin_arweave::{ArweaveConfig, ArweaveStorageProvider};
 use wrfcoin_data_tiering::{
-    ArweaveCostModel, CostEstimator, FilecoinCostModel, InMemoryMetrics, IpfsCostModel,
-    StorageAnalytics, StorageBudget, TieringConfig,
+    CostEstimator, InMemoryMetrics, IpfsCostModel, StorageAnalytics, StorageBudget, TieringConfig,
 };
 use wrfcoin_filecoin::{FilecoinConfig, FilecoinStorageProvider};
 use wrfcoin_ipfs::{IpfsConfig, IpfsStorageProvider};
@@ -12,9 +11,27 @@ use wrfcoin_storage_common::error::StorageError;
 use wrfcoin_storage_common::traits::StorageProvider;
 use wrfcoin_storage_common::{DomainContentIndex, FailoverMetrics, StorageStats};
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProviderPosture {
+    Active,
+    NotInTestnet,
+    Misconfigured(String),
+}
+impl ProviderPosture {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::NotInTestnet => "not_in_testnet",
+            Self::Misconfigured(_) => "misconfigured",
+        }
+    }
+}
+
 /// Application state holding configured storage providers plus cost-estimator
 /// and analytics sub-systems.
 pub struct AppState {
+    testnet: bool,
+    pub remote_pinning_enabled: bool,
     /// Map of provider names to their trait objects.
     providers: HashMap<String, Box<dyn StorageProvider>>,
     /// Default provider to use if none is specified.
@@ -45,9 +62,24 @@ impl AppState {
     /// - `DEFAULT_PROVIDER`: Default provider for operations (defaults to "ipfs")
     /// - `IPFS_IS_LOCAL`: `"true"` (default) for free local node, `"false"` for remote pinning
     /// - `IPFS_REMOTE_USD_PER_GIB_MONTH`: remote IPFS cost (default: 0.15)
-    /// - `FIL_USD_RATE`: FIL/USD rate for Filecoin; 0.0 → report costs in FIL (default: 0.0)
-    /// - `AR_USD_RATE`: AR/USD rate for Arweave; 0.0 → report costs in AR (default: 0.0)
-    pub async fn new() -> Result<Self, StorageError> {
+    pub async fn new(ipfs_endpoint: Option<&str>) -> Result<Self, StorageError> {
+        let testnet = match env::var("STORAGE_NODE_PROFILE")
+            .as_deref()
+            .unwrap_or("testnet")
+        {
+            "testnet" => true,
+            "full" => false,
+            _ => {
+                return Err(StorageError::ConfigError(
+                    "STORAGE_NODE_PROFILE must be testnet or full".into(),
+                ))
+            }
+        };
+        if testnet && env::var("IPFS_REMOTE_PINNING").is_ok_and(|v| v != "false" && v != "0") {
+            tracing::warn!(
+                "IPFS_REMOTE_PINNING ignored: remote pinning forced off in testnet profile"
+            );
+        }
         let mut providers: HashMap<String, Box<dyn StorageProvider>> = HashMap::new();
 
         let providers_list = env::var("STORAGE_PROVIDERS").unwrap_or_else(|_| "ipfs".to_string());
@@ -56,10 +88,24 @@ impl AppState {
 
         for provider_name in providers_list.split(',') {
             let provider_name = provider_name.trim();
+            if testnet && matches!(provider_name, "filecoin" | "arweave") {
+                return Err(StorageError::ConfigError(
+                    "refusing paid provider in testnet profile".into(),
+                ));
+            }
             match provider_name {
                 "ipfs" => {
-                    let config = IpfsConfig::default();
-                    let ipfs_provider = IpfsStorageProvider::new(config);
+                    let url = env::var("IPFS_API_URL")
+                        .ok()
+                        .or_else(|| ipfs_endpoint.map(str::to_owned))
+                        .unwrap_or_else(|| "http://localhost:5001".into());
+                    let mut config = if testnet {
+                        IpfsConfig::unauthenticated(url.clone())
+                    } else {
+                        IpfsConfig::default()
+                    };
+                    config.api_url = url;
+                    let ipfs_provider = IpfsStorageProvider::try_new(config)?;
                     providers.insert(
                         provider_name.to_string(),
                         Box::new(ipfs_provider) as Box<dyn StorageProvider>,
@@ -104,50 +150,25 @@ impl AppState {
         }
 
         // Build cost estimator for configured providers.
-        let ipfs_is_local = env::var("IPFS_IS_LOCAL")
-            .map(|v| v != "false")
-            .unwrap_or(true);
+        let ipfs_is_local = testnet
+            || env::var("IPFS_IS_LOCAL")
+                .map(|v| v != "false")
+                .unwrap_or(true);
         let ipfs_remote_rate = env::var("IPFS_REMOTE_USD_PER_GIB_MONTH")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .unwrap_or(0.15);
-        let fil_usd_rate = env::var("FIL_USD_RATE")
-            .ok()
-            .and_then(|v| v.parse::<f64>().ok())
-            .unwrap_or(0.0);
-        let ar_usd_rate = env::var("AR_USD_RATE")
-            .ok()
-            .and_then(|v| v.parse::<f64>().ok())
-            .unwrap_or(0.0);
-
         let mut cost_estimator = CostEstimator::new();
         let mut provider_metrics_map: HashMap<String, Arc<InMemoryMetrics>> = HashMap::new();
         let mut provider_stats_map: HashMap<String, StorageStats> = HashMap::new();
 
-        for name in providers.keys() {
+        for name in providers.keys().filter(|name| name.as_str() == "ipfs") {
             provider_metrics_map.insert(name.clone(), Arc::new(InMemoryMetrics::new()));
             provider_stats_map.insert(name.clone(), StorageStats::default());
-            match name.as_str() {
-                "ipfs" => {
-                    cost_estimator.add_model(Box::new(IpfsCostModel {
-                        is_local: ipfs_is_local,
-                        remote_usd_per_gib_per_month: ipfs_remote_rate,
-                    }));
-                }
-                "filecoin" => {
-                    cost_estimator.add_model(Box::new(FilecoinCostModel {
-                        fil_usd_rate,
-                        ..Default::default()
-                    }));
-                }
-                "arweave" => {
-                    cost_estimator.add_model(Box::new(ArweaveCostModel {
-                        ar_usd_rate,
-                        ..Default::default()
-                    }));
-                }
-                _ => {}
-            }
+            cost_estimator.add_model(Box::new(IpfsCostModel {
+                is_local: ipfs_is_local,
+                remote_usd_per_gib_per_month: ipfs_remote_rate,
+            }));
         }
 
         tracing::info!(
@@ -156,6 +177,8 @@ impl AppState {
         );
 
         Ok(Self {
+            testnet,
+            remote_pinning_enabled: false,
             providers,
             default_provider,
             cost_estimator,
@@ -169,8 +192,29 @@ impl AppState {
         })
     }
 
+    pub fn provider_postures(&self) -> BTreeMap<String, ProviderPosture> {
+        ["ipfs", "filecoin", "arweave"]
+            .into_iter()
+            .map(|name| {
+                let posture = if self.testnet && name != "ipfs" {
+                    ProviderPosture::NotInTestnet
+                } else if name == "ipfs" && self.providers.contains_key(name) {
+                    ProviderPosture::Active
+                } else {
+                    ProviderPosture::Misconfigured("provider unavailable or incomplete".into())
+                };
+                (name.into(), posture)
+            })
+            .collect()
+    }
+
     /// Get a specific provider by name.
     pub fn get_provider(&self, name: &str) -> Result<&dyn StorageProvider, StorageError> {
+        if self.testnet && matches!(name, "filecoin" | "arweave") {
+            return Err(StorageError::NotInTestnet {
+                provider: name.into(),
+            });
+        }
         self.providers
             .get(name)
             .map(|b| b.as_ref())
