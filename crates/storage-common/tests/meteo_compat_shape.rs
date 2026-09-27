@@ -26,7 +26,10 @@ fn provenance_chain_roundtrip() {
     let decoded: ProvenanceChain = serde_json::from_str(&encoded).unwrap();
 
     assert_eq!(decoded, chain);
-    assert_eq!(serde_json::from_str::<serde_json::Value>(&encoded).unwrap(), serde_json::json!([
-        { "attester_id": "station-kdlh", "timestamp": 1_726_128_000_u64 }
-    ]));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&encoded).unwrap(),
+        serde_json::json!([
+            { "attester_id": "station-kdlh", "timestamp": 1_726_128_000_u64 }
+        ])
+    );
 }

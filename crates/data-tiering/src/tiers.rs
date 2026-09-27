@@ -37,21 +37,21 @@ impl Default for TieringConfig {
             hot: TierConfig {
                 tier: DataTier::Hot,
                 max_size_bytes: 10 * 1024 * 1024 * 1024, // 10 GiB
-                max_age_secs: 86_400,                      // 1 day
+                max_age_secs: 86_400,                    // 1 day
                 cost_per_gib: 0.10,
                 access_time_ms: 5,
             },
             warm: TierConfig {
                 tier: DataTier::Warm,
                 max_size_bytes: 100 * 1024 * 1024 * 1024, // 100 GiB
-                max_age_secs: 604_800,                      // 7 days
+                max_age_secs: 604_800,                    // 7 days
                 cost_per_gib: 0.03,
                 access_time_ms: 50,
             },
             cold: TierConfig {
                 tier: DataTier::Cold,
                 max_size_bytes: 1024 * 1024 * 1024 * 1024, // 1 TiB
-                max_age_secs: 2_592_000,                     // 30 days
+                max_age_secs: 2_592_000,                   // 30 days
                 cost_per_gib: 0.005,
                 access_time_ms: 500,
             },
@@ -107,7 +107,10 @@ mod tests {
         assert_eq!(config.config_for(&DataTier::Hot).tier, DataTier::Hot);
         assert_eq!(config.config_for(&DataTier::Warm).tier, DataTier::Warm);
         assert_eq!(config.config_for(&DataTier::Cold).tier, DataTier::Cold);
-        assert_eq!(config.config_for(&DataTier::Archive).tier, DataTier::Archive);
+        assert_eq!(
+            config.config_for(&DataTier::Archive).tier,
+            DataTier::Archive
+        );
     }
 
     #[test]

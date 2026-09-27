@@ -1,16 +1,16 @@
 use std::collections::HashMap;
 use std::env;
 use std::sync::{Arc, Mutex};
-use wrfcoin_storage_common::error::StorageError;
-use wrfcoin_storage_common::traits::StorageProvider;
-use wrfcoin_storage_common::{DomainContentIndex, FailoverMetrics, StorageStats};
-use wrfcoin_ipfs::{IpfsConfig, IpfsStorageProvider};
-use wrfcoin_filecoin::{FilecoinConfig, FilecoinStorageProvider};
 use wrfcoin_arweave::{ArweaveConfig, ArweaveStorageProvider};
 use wrfcoin_data_tiering::{
     ArweaveCostModel, CostEstimator, FilecoinCostModel, InMemoryMetrics, IpfsCostModel,
     StorageAnalytics, StorageBudget, TieringConfig,
 };
+use wrfcoin_filecoin::{FilecoinConfig, FilecoinStorageProvider};
+use wrfcoin_ipfs::{IpfsConfig, IpfsStorageProvider};
+use wrfcoin_storage_common::error::StorageError;
+use wrfcoin_storage_common::traits::StorageProvider;
+use wrfcoin_storage_common::{DomainContentIndex, FailoverMetrics, StorageStats};
 
 /// Application state holding configured storage providers plus cost-estimator
 /// and analytics sub-systems.
@@ -50,11 +50,9 @@ impl AppState {
     pub async fn new() -> Result<Self, StorageError> {
         let mut providers: HashMap<String, Box<dyn StorageProvider>> = HashMap::new();
 
-        let providers_list = env::var("STORAGE_PROVIDERS")
-            .unwrap_or_else(|_| "ipfs".to_string());
+        let providers_list = env::var("STORAGE_PROVIDERS").unwrap_or_else(|_| "ipfs".to_string());
 
-        let default_provider = env::var("DEFAULT_PROVIDER")
-            .unwrap_or_else(|_| "ipfs".to_string());
+        let default_provider = env::var("DEFAULT_PROVIDER").unwrap_or_else(|_| "ipfs".to_string());
 
         for provider_name in providers_list.split(',') {
             let provider_name = provider_name.trim();
@@ -62,17 +60,26 @@ impl AppState {
                 "ipfs" => {
                     let config = IpfsConfig::default();
                     let ipfs_provider = IpfsStorageProvider::new(config);
-                    providers.insert(provider_name.to_string(), Box::new(ipfs_provider) as Box<dyn StorageProvider>);
+                    providers.insert(
+                        provider_name.to_string(),
+                        Box::new(ipfs_provider) as Box<dyn StorageProvider>,
+                    );
                 }
                 "filecoin" => {
                     let config = FilecoinConfig::default();
                     let fc_provider = FilecoinStorageProvider::new(config);
-                    providers.insert(provider_name.to_string(), Box::new(fc_provider) as Box<dyn StorageProvider>);
+                    providers.insert(
+                        provider_name.to_string(),
+                        Box::new(fc_provider) as Box<dyn StorageProvider>,
+                    );
                 }
                 "arweave" => {
                     let config = ArweaveConfig::default();
                     let ar_provider = ArweaveStorageProvider::new(config);
-                    providers.insert(provider_name.to_string(), Box::new(ar_provider) as Box<dyn StorageProvider>);
+                    providers.insert(
+                        provider_name.to_string(),
+                        Box::new(ar_provider) as Box<dyn StorageProvider>,
+                    );
                 }
                 other => {
                     return Err(StorageError::ConfigError(format!(

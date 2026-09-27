@@ -180,10 +180,9 @@ impl PublicInterestAccessManager {
         let trust_allowed = match &effective_tier {
             AccessTier::OpenAccess => true,
             AccessTier::RegisteredAccess => !matches!(requester_trust, TrustClass::Untrusted),
-            AccessTier::RestrictedAccess => matches!(
-                requester_trust,
-                TrustClass::Verified | TrustClass::Standard
-            ),
+            AccessTier::RestrictedAccess => {
+                matches!(requester_trust, TrustClass::Verified | TrustClass::Standard)
+            }
             AccessTier::InternalOnly => matches!(requester_trust, TrustClass::Verified),
         };
 
@@ -280,7 +279,8 @@ impl PublicInterestAccessManager {
     /// - Overrides do not modify the underlying policy — they are temporary governance directives.
     /// - Multiple overlapping overrides are allowed (e.g., both "weather" and "weather.emergency" can be overridden).
     pub fn set_governance_override(&mut self, report_class: &str) {
-        self.governance_overrides.insert(report_class.to_string(), true);
+        self.governance_overrides
+            .insert(report_class.to_string(), true);
     }
 
     /// Clear a governance override for `report_class`, reverting to the standard policy.
@@ -394,8 +394,7 @@ mod tests {
             TrustClass::Probation,
             TrustClass::Untrusted,
         ] {
-            let result =
-                mgr.check_access("weather.open", &trust, 0.0, false, &DataTier::Archive);
+            let result = mgr.check_access("weather.open", &trust, 0.0, false, &DataTier::Archive);
             assert!(
                 result.allowed,
                 "OpenAccess should allow {:?}, but got: {}",
@@ -422,14 +421,13 @@ mod tests {
         assert!(!blocked.allowed);
 
         // All other trust classes must be allowed
-        for trust in [TrustClass::Verified, TrustClass::Standard, TrustClass::Probation] {
-            let result = mgr.check_access(
-                "weather.registered",
-                &trust,
-                0.0,
-                false,
-                &DataTier::Archive,
-            );
+        for trust in [
+            TrustClass::Verified,
+            TrustClass::Standard,
+            TrustClass::Probation,
+        ] {
+            let result =
+                mgr.check_access("weather.registered", &trust, 0.0, false, &DataTier::Archive);
             assert!(
                 result.allowed,
                 "RegisteredAccess should allow {:?}, but got: {}",
@@ -445,13 +443,8 @@ mod tests {
         mgr.register_policy(restricted_access_policy("weather.restricted"));
 
         for trust in [TrustClass::Verified, TrustClass::Standard] {
-            let result = mgr.check_access(
-                "weather.restricted",
-                &trust,
-                0.0,
-                false,
-                &DataTier::Archive,
-            );
+            let result =
+                mgr.check_access("weather.restricted", &trust, 0.0, false, &DataTier::Archive);
             assert!(
                 result.allowed,
                 "RestrictedAccess should allow {:?}, but got: {}",
@@ -460,18 +453,9 @@ mod tests {
         }
 
         for trust in [TrustClass::Probation, TrustClass::Untrusted] {
-            let result = mgr.check_access(
-                "weather.restricted",
-                &trust,
-                0.0,
-                false,
-                &DataTier::Archive,
-            );
-            assert!(
-                !result.allowed,
-                "RestrictedAccess should deny {:?}",
-                trust
-            );
+            let result =
+                mgr.check_access("weather.restricted", &trust, 0.0, false, &DataTier::Archive);
+            assert!(!result.allowed, "RestrictedAccess should deny {:?}", trust);
         }
     }
 
@@ -490,19 +474,14 @@ mod tests {
         );
         assert!(allowed.allowed);
 
-        for trust in [TrustClass::Standard, TrustClass::Probation, TrustClass::Untrusted] {
-            let result = mgr.check_access(
-                "weather.internal",
-                &trust,
-                0.0,
-                false,
-                &DataTier::Archive,
-            );
-            assert!(
-                !result.allowed,
-                "InternalOnly should deny {:?}",
-                trust
-            );
+        for trust in [
+            TrustClass::Standard,
+            TrustClass::Probation,
+            TrustClass::Untrusted,
+        ] {
+            let result =
+                mgr.check_access("weather.internal", &trust, 0.0, false, &DataTier::Archive);
+            assert!(!result.allowed, "InternalOnly should deny {:?}", trust);
         }
     }
 
@@ -715,8 +694,7 @@ mod tests {
             max_storage_tier: DataTier::Cold,
         };
         let json = serde_json::to_string(&policy).expect("serialize");
-        let decoded: PublicInterestAccessPolicy =
-            serde_json::from_str(&json).expect("deserialize");
+        let decoded: PublicInterestAccessPolicy = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(decoded.report_class, policy.report_class);
         assert_eq!(decoded.access_tier, AccessTier::RestrictedAccess);
         assert!((decoded.min_quality_score - 0.75).abs() < f64::EPSILON);
@@ -816,8 +794,8 @@ mod tests {
         let result = mgr.check_access(
             "weather.emergency",
             &TrustClass::Untrusted,
-            0.0, // fails quality check
-            false, // fails provenance check
+            0.0,             // fails quality check
+            false,           // fails provenance check
             &DataTier::Cold, // fails tier check
         );
         assert!(result.allowed);

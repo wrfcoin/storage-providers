@@ -2,15 +2,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use wrfcoin_storage_common::{
-    AdmissionDecision, AvailabilitySlaStatus, ContentId, DataTier, EnvironmentalReport, Metadata,
-    ProvenanceChain, ProvenanceValidationResult, PublicInterestAvailabilityPolicy, QuarantineRecord,
-    StorageError, StorageProvider, StorageStats, validate_report_payload,
-};
 use wrfcoin_storage_common::domain_index::{DomainContentIndex, IndexEntry};
+use wrfcoin_storage_common::provenance::{ProvenancePolicy, ProvenanceValidator};
 use wrfcoin_storage_common::EnvironmentalDomain;
-use wrfcoin_storage_common::provenance::{
-    ProvenancePolicy, ProvenanceValidator,
+use wrfcoin_storage_common::{
+    validate_report_payload, AdmissionDecision, AvailabilitySlaStatus, ContentId, DataTier,
+    EnvironmentalReport, Metadata, ProvenanceChain, ProvenanceValidationResult,
+    PublicInterestAvailabilityPolicy, QuarantineRecord, StorageError, StorageProvider,
+    StorageStats,
 };
 
 use crate::tiers::TieringConfig;
@@ -74,7 +73,12 @@ impl DataTieringOrchestrator {
     ///
     /// Returns the data from the first tier that has the content.
     pub async fn retrieve_auto(&self, id: &ContentId) -> Result<Vec<u8>, StorageError> {
-        let tier_order = [DataTier::Hot, DataTier::Warm, DataTier::Cold, DataTier::Archive];
+        let tier_order = [
+            DataTier::Hot,
+            DataTier::Warm,
+            DataTier::Cold,
+            DataTier::Archive,
+        ];
 
         for tier in &tier_order {
             if let Some(provider) = self.tiers.get(tier) {
@@ -99,17 +103,15 @@ impl DataTieringOrchestrator {
         to_tier: &DataTier,
         metadata: &Metadata,
     ) -> Result<ContentId, StorageError> {
-        let from_provider = self
-            .tiers
-            .get(from_tier)
-            .ok_or_else(|| StorageError::ProviderError(format!("no provider for tier {from_tier:?}")))?;
+        let from_provider = self.tiers.get(from_tier).ok_or_else(|| {
+            StorageError::ProviderError(format!("no provider for tier {from_tier:?}"))
+        })?;
 
         let data = from_provider.retrieve(id).await?;
 
-        let to_provider = self
-            .tiers
-            .get(to_tier)
-            .ok_or_else(|| StorageError::ProviderError(format!("no provider for tier {to_tier:?}")))?;
+        let to_provider = self.tiers.get(to_tier).ok_or_else(|| {
+            StorageError::ProviderError(format!("no provider for tier {to_tier:?}"))
+        })?;
 
         to_provider.store(&data, metadata).await
     }
@@ -126,17 +128,15 @@ impl DataTieringOrchestrator {
         metadata: &Metadata,
         delete_from_source: bool,
     ) -> Result<ContentId, StorageError> {
-        let from_provider = self
-            .tiers
-            .get(from_tier)
-            .ok_or_else(|| StorageError::ProviderError(format!("no provider for tier {from_tier:?}")))?;
+        let from_provider = self.tiers.get(from_tier).ok_or_else(|| {
+            StorageError::ProviderError(format!("no provider for tier {from_tier:?}"))
+        })?;
 
         let data = from_provider.retrieve(id).await?;
 
-        let to_provider = self
-            .tiers
-            .get(to_tier)
-            .ok_or_else(|| StorageError::ProviderError(format!("no provider for tier {to_tier:?}")))?;
+        let to_provider = self.tiers.get(to_tier).ok_or_else(|| {
+            StorageError::ProviderError(format!("no provider for tier {to_tier:?}"))
+        })?;
 
         let new_id = to_provider.store(&data, metadata).await?;
 
@@ -172,8 +172,13 @@ impl DataTieringOrchestrator {
     }
 
     /// Verify provenance chain integrity for accepted content.
-    pub fn validate_provenance_chain(&self, chain: &ProvenanceChain) -> Result<ProvenanceValidationResult, StorageError> {
-        let policy = self.provenance_policy.read()
+    pub fn validate_provenance_chain(
+        &self,
+        chain: &ProvenanceChain,
+    ) -> Result<ProvenanceValidationResult, StorageError> {
+        let policy = self
+            .provenance_policy
+            .read()
             .map_err(|e| StorageError::Internal(format!("lock poisoned: {e}")))?
             .clone();
         let validator = ProvenanceValidator::new(policy);
@@ -200,7 +205,9 @@ impl DataTieringOrchestrator {
             .as_secs();
         let quarantine_id = format!("q-{}-{}", now, chain.chain_id);
         {
-            let mut guard = self.quarantine_records.write()
+            let mut guard = self
+                .quarantine_records
+                .write()
                 .map_err(|e| StorageError::Internal(format!("lock poisoned: {e}")))?;
             guard.insert(
                 quarantine_id.clone(),
@@ -225,7 +232,9 @@ impl DataTieringOrchestrator {
 
     /// Replace the active provenance policy.
     pub fn set_provenance_policy(&self, policy: ProvenancePolicy) -> Result<(), StorageError> {
-        let mut guard = self.provenance_policy.write()
+        let mut guard = self
+            .provenance_policy
+            .write()
             .map_err(|e| StorageError::Internal(format!("lock poisoned: {e}")))?;
         *guard = policy;
         Ok(())
@@ -237,7 +246,9 @@ impl DataTieringOrchestrator {
     /// Returns `Ok(())` when the chain satisfies all policy constraints,
     /// otherwise `Err` with a human-readable reason.
     fn validate_chain_with_policy(&self, chain: &ProvenanceChain) -> Result<(), String> {
-        let policy = self.provenance_policy.read()
+        let policy = self
+            .provenance_policy
+            .read()
             .map_err(|e| format!("lock poisoned: {e}"))?
             .clone();
         let validator = ProvenanceValidator::new(policy);
@@ -256,7 +267,9 @@ impl DataTieringOrchestrator {
         tier: &DataTier,
         provenance_chain: Option<&ProvenanceChain>,
     ) -> Result<AdmissionDecision, StorageError> {
-        let require = self.provenance_policy.read()
+        let require = self
+            .provenance_policy
+            .read()
             .map_err(|e| StorageError::Internal(format!("lock poisoned: {e}")))?
             .require_provenance;
 
@@ -284,7 +297,9 @@ impl DataTieringOrchestrator {
                     .as_secs();
                 let quarantine_id = format!("q-{}-{}", now, chain.chain_id);
                 {
-                    let mut guard = self.quarantine_records.write()
+                    let mut guard = self
+                        .quarantine_records
+                        .write()
                         .map_err(|e| StorageError::Internal(format!("lock poisoned: {e}")))?;
                     guard.insert(
                         quarantine_id.clone(),
@@ -324,7 +339,9 @@ impl DataTieringOrchestrator {
             return Err(StorageError::InvalidData(reason));
         }
         // 3. Provenance presence check.
-        let require = self.provenance_policy.read()
+        let require = self
+            .provenance_policy
+            .read()
             .map_err(|e| StorageError::Internal(format!("lock poisoned: {e}")))?
             .require_provenance;
         if require && report.provenance.is_none() {
@@ -380,7 +397,8 @@ impl DataTieringOrchestrator {
 
     /// Return quarantine records for synthetic-content review workflows.
     pub fn list_quarantine_records(&self) -> Result<Vec<QuarantineRecord>, StorageError> {
-        Ok(self.quarantine_records
+        Ok(self
+            .quarantine_records
             .read()
             .map_err(|e| StorageError::Internal(format!("lock poisoned: {e}")))?
             .values()
@@ -390,7 +408,9 @@ impl DataTieringOrchestrator {
 
     /// Mark quarantined content as reinstated following review.
     pub fn reinstate_quarantine(&self, quarantine_id: &str) -> Result<bool, StorageError> {
-        let mut guard = self.quarantine_records.write()
+        let mut guard = self
+            .quarantine_records
+            .write()
             .map_err(|e| StorageError::Internal(format!("lock poisoned: {e}")))?;
         let Some(record) = guard.get_mut(quarantine_id) else {
             return Ok(false);
@@ -400,8 +420,14 @@ impl DataTieringOrchestrator {
     }
 
     /// Configure minimum replicas for a public-interest report class.
-    pub fn set_public_interest_policy(&self, class: &str, min_replicas: u8) -> Result<(), StorageError> {
-        let mut guard = self.public_interest_policies.write()
+    pub fn set_public_interest_policy(
+        &self,
+        class: &str,
+        min_replicas: u8,
+    ) -> Result<(), StorageError> {
+        let mut guard = self
+            .public_interest_policies
+            .write()
             .map_err(|e| StorageError::Internal(format!("lock poisoned: {e}")))?;
         guard.insert(
             class.to_string(),
@@ -437,7 +463,12 @@ impl DataTieringOrchestrator {
             .map(|p| p.min_replicas)
             .unwrap_or(3);
 
-        let tier_order = [DataTier::Hot, DataTier::Warm, DataTier::Cold, DataTier::Archive];
+        let tier_order = [
+            DataTier::Hot,
+            DataTier::Warm,
+            DataTier::Cold,
+            DataTier::Archive,
+        ];
         let mut content_ids = Vec::new();
         for tier in &tier_order {
             if content_ids.len() >= target_replicas as usize {
@@ -731,11 +762,19 @@ mod tests {
         };
 
         let (decision, cid) = orch
-            .store_verified_with_tier(&DataTier::Hot, b"bad provenance", &test_metadata(), &invalid)
+            .store_verified_with_tier(
+                &DataTier::Hot,
+                b"bad provenance",
+                &test_metadata(),
+                &invalid,
+            )
             .await
             .unwrap();
         assert_eq!(decision, AdmissionDecision::Quarantined);
-        assert!(cid.is_some(), "quarantined content should be persisted in archive when available");
+        assert!(
+            cid.is_some(),
+            "quarantined content should be persisted in archive when available"
+        );
         assert_eq!(orch.list_quarantine_records().unwrap().len(), 1);
     }
 
@@ -745,7 +784,8 @@ mod tests {
         orch.register_tier(DataTier::Hot, Box::new(MockProvider::new("hot")));
         orch.register_tier(DataTier::Warm, Box::new(MockProvider::new("warm")));
         orch.register_tier(DataTier::Cold, Box::new(MockProvider::new("cold")));
-        orch.set_public_interest_policy("public_interest.weather", 3).unwrap();
+        orch.set_public_interest_policy("public_interest.weather", 3)
+            .unwrap();
 
         let result = orch
             .store_public_interest_with_sla(
@@ -843,7 +883,8 @@ mod tests {
             require_provenance: true,
             min_chain_length: 3,
             allowed_algorithms: Vec::new(),
-        }).unwrap();
+        })
+        .unwrap();
 
         let decision = orch
             .store_with_provenance_enforcement(
@@ -869,7 +910,8 @@ mod tests {
             require_provenance: true,
             min_chain_length: 1,
             allowed_algorithms: vec!["secp256k1".to_string()],
-        }).unwrap();
+        })
+        .unwrap();
 
         let decision = orch
             .store_with_provenance_enforcement(
@@ -894,7 +936,8 @@ mod tests {
             require_provenance: false,
             min_chain_length: 0,
             allowed_algorithms: Vec::new(),
-        }).unwrap();
+        })
+        .unwrap();
 
         let decision = orch
             .store_with_provenance_enforcement(
@@ -912,18 +955,22 @@ mod tests {
     // ---- store_environmental_report tests ----
 
     fn sample_env_report_with_provenance() -> wrfcoin_storage_common::EnvironmentalReport {
-        use wrfcoin_storage_common::{
-            EnvironmentalDomain, EnvironmentalReport, GeoLocation, ReportPayload, WeatherPayload,
-        };
         use wrfcoin_storage_common::meteo_compat::{
             ProvenanceChain as MeteoChain, ProvenanceEntry,
+        };
+        use wrfcoin_storage_common::{
+            EnvironmentalDomain, EnvironmentalReport, GeoLocation, ReportPayload, WeatherPayload,
         };
 
         EnvironmentalReport {
             report_id: "env-001".to_string(),
             domain: EnvironmentalDomain::Weather,
             station_id: "stn-env-1".to_string(),
-            location: GeoLocation { latitude: 45.0, longitude: -90.0, altitude_m: None },
+            location: GeoLocation {
+                latitude: 45.0,
+                longitude: -90.0,
+                altitude_m: None,
+            },
             observed_at: 9_000_000,
             submitted_at: 9_000_001,
             payload: ReportPayload::Weather(WeatherPayload {
@@ -932,9 +979,10 @@ mod tests {
                 ..Default::default()
             }),
             quality_score: Some(0.9),
-            provenance: Some(MeteoChain::new(vec![
-                ProvenanceEntry { attester_id: "signer-1".into(), timestamp: 10 },
-            ])),
+            provenance: Some(MeteoChain::new(vec![ProvenanceEntry {
+                attester_id: "signer-1".into(),
+                timestamp: 10,
+            }])),
         }
     }
 
@@ -976,7 +1024,9 @@ mod tests {
         let mut report = sample_env_report_with_provenance();
         report.report_id = "".to_string(); // triggers validation failure
 
-        let result = orch.store_environmental_report(&report, DataTier::Hot).await;
+        let result = orch
+            .store_environmental_report(&report, DataTier::Hot)
+            .await;
         assert!(result.is_err());
     }
 
@@ -992,35 +1042,52 @@ mod tests {
             require_provenance: false,
             min_chain_length: 0,
             allowed_algorithms: Vec::new(),
-        }).unwrap();
+        })
+        .unwrap();
 
         let soil_report = EnvironmentalReport {
             report_id: "soil-idx-1".into(),
             domain: EnvironmentalDomain::Soil,
             station_id: "stn-s1".into(),
-            location: GeoLocation { latitude: 45.0, longitude: -93.0, altitude_m: None },
-            observed_at: 1000, submitted_at: 1001,
+            location: GeoLocation {
+                latitude: 45.0,
+                longitude: -93.0,
+                altitude_m: None,
+            },
+            observed_at: 1000,
+            submitted_at: 1001,
             payload: ReportPayload::Soil(SoilPayload {
-                moisture_pct: Some(30.0), temperature_c: None, ph: Some(6.5),
-                organic_carbon_pct: None, nitrogen_mgl: None, phosphorus_mgl: None,
-                potassium_mgl: None, conductivity_dsm: None, depth_cm: Some(10.0),
+                moisture_pct: Some(30.0),
+                temperature_c: None,
+                ph: Some(6.5),
+                organic_carbon_pct: None,
+                nitrogen_mgl: None,
+                phosphorus_mgl: None,
+                potassium_mgl: None,
+                conductivity_dsm: None,
+                depth_cm: Some(10.0),
             }),
             quality_score: Some(0.9),
             provenance: None,
         };
 
-        orch.store_environmental_report(&soil_report, DataTier::Hot).await.unwrap();
+        orch.store_environmental_report(&soil_report, DataTier::Hot)
+            .await
+            .unwrap();
 
         assert_eq!(orch.query_domain_index(&EnvironmentalDomain::Soil).len(), 1);
-        assert_eq!(orch.query_domain_index(&EnvironmentalDomain::Ocean).len(), 0);
+        assert_eq!(
+            orch.query_domain_index(&EnvironmentalDomain::Ocean).len(),
+            0
+        );
         assert_eq!(orch.domain_index_total(), 1);
     }
 
     #[tokio::test]
     async fn test_domain_index_multiple_domains() {
         use wrfcoin_storage_common::{
-            EnvironmentalDomain, EnvironmentalReport, GeoLocation, ReportPayload,
-            SoilPayload, OceanPayload, HydrologyPayload,
+            EnvironmentalDomain, EnvironmentalReport, GeoLocation, HydrologyPayload, OceanPayload,
+            ReportPayload, SoilPayload,
         };
 
         let mut orch = DataTieringOrchestrator::new(TieringConfig::default());
@@ -1029,43 +1096,91 @@ mod tests {
             require_provenance: false,
             min_chain_length: 0,
             allowed_algorithms: Vec::new(),
-        }).unwrap();
+        })
+        .unwrap();
 
-        let make_report = |id: &str, domain: EnvironmentalDomain, payload: ReportPayload| {
-            EnvironmentalReport {
-                report_id: id.into(), domain,
+        let make_report =
+            |id: &str, domain: EnvironmentalDomain, payload: ReportPayload| EnvironmentalReport {
+                report_id: id.into(),
+                domain,
                 station_id: "stn-1".into(),
-                location: GeoLocation { latitude: 0.0, longitude: 0.0, altitude_m: None },
-                observed_at: 1000, submitted_at: 1001, payload,
-                quality_score: None, provenance: None,
-            }
-        };
+                location: GeoLocation {
+                    latitude: 0.0,
+                    longitude: 0.0,
+                    altitude_m: None,
+                },
+                observed_at: 1000,
+                submitted_at: 1001,
+                payload,
+                quality_score: None,
+                provenance: None,
+            };
 
-        let soil = make_report("s1", EnvironmentalDomain::Soil, ReportPayload::Soil(SoilPayload {
-            moisture_pct: Some(20.0), temperature_c: None, ph: None,
-            organic_carbon_pct: None, nitrogen_mgl: None, phosphorus_mgl: None,
-            potassium_mgl: None, conductivity_dsm: None, depth_cm: None,
-        }));
-        let ocean = make_report("o1", EnvironmentalDomain::Ocean, ReportPayload::Ocean(OceanPayload {
-            sea_surface_temperature_c: Some(25.0), salinity_psu: None,
-            wave_height_m: None, wave_period_s: None, current_speed_ms: None,
-            current_direction_deg: None, chlorophyll_a_mgl: None,
-            dissolved_oxygen_mgl: None, depth_m: None,
-        }));
-        let hydro = make_report("h1", EnvironmentalDomain::Hydrology, ReportPayload::Hydrology(HydrologyPayload {
-            river_discharge_m3s: Some(500.0), water_level_m: None,
-            flow_velocity_ms: None, sediment_load_mgl: None,
-            groundwater_level_m: None, reservoir_storage_pct: None,
-            flood_risk_level: None, drought_index: None,
-        }));
+        let soil = make_report(
+            "s1",
+            EnvironmentalDomain::Soil,
+            ReportPayload::Soil(SoilPayload {
+                moisture_pct: Some(20.0),
+                temperature_c: None,
+                ph: None,
+                organic_carbon_pct: None,
+                nitrogen_mgl: None,
+                phosphorus_mgl: None,
+                potassium_mgl: None,
+                conductivity_dsm: None,
+                depth_cm: None,
+            }),
+        );
+        let ocean = make_report(
+            "o1",
+            EnvironmentalDomain::Ocean,
+            ReportPayload::Ocean(OceanPayload {
+                sea_surface_temperature_c: Some(25.0),
+                salinity_psu: None,
+                wave_height_m: None,
+                wave_period_s: None,
+                current_speed_ms: None,
+                current_direction_deg: None,
+                chlorophyll_a_mgl: None,
+                dissolved_oxygen_mgl: None,
+                depth_m: None,
+            }),
+        );
+        let hydro = make_report(
+            "h1",
+            EnvironmentalDomain::Hydrology,
+            ReportPayload::Hydrology(HydrologyPayload {
+                river_discharge_m3s: Some(500.0),
+                water_level_m: None,
+                flow_velocity_ms: None,
+                sediment_load_mgl: None,
+                groundwater_level_m: None,
+                reservoir_storage_pct: None,
+                flood_risk_level: None,
+                drought_index: None,
+            }),
+        );
 
-        orch.store_environmental_report(&soil, DataTier::Hot).await.unwrap();
-        orch.store_environmental_report(&ocean, DataTier::Hot).await.unwrap();
-        orch.store_environmental_report(&hydro, DataTier::Hot).await.unwrap();
+        orch.store_environmental_report(&soil, DataTier::Hot)
+            .await
+            .unwrap();
+        orch.store_environmental_report(&ocean, DataTier::Hot)
+            .await
+            .unwrap();
+        orch.store_environmental_report(&hydro, DataTier::Hot)
+            .await
+            .unwrap();
 
         assert_eq!(orch.query_domain_index(&EnvironmentalDomain::Soil).len(), 1);
-        assert_eq!(orch.query_domain_index(&EnvironmentalDomain::Ocean).len(), 1);
-        assert_eq!(orch.query_domain_index(&EnvironmentalDomain::Hydrology).len(), 1);
+        assert_eq!(
+            orch.query_domain_index(&EnvironmentalDomain::Ocean).len(),
+            1
+        );
+        assert_eq!(
+            orch.query_domain_index(&EnvironmentalDomain::Hydrology)
+                .len(),
+            1
+        );
         assert_eq!(orch.domain_index_total(), 3);
     }
 }

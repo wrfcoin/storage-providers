@@ -408,7 +408,10 @@ mod tests {
     #[tokio::test]
     async fn test_ipfs_local_is_free() {
         let model = IpfsCostModel::default(); // is_local = true
-        let est = model.estimate_cost(ONE_GIB, THIRTY_DAYS_SECS).await.unwrap();
+        let est = model
+            .estimate_cost(ONE_GIB, THIRTY_DAYS_SECS)
+            .await
+            .unwrap();
         assert_eq!(est.total_cost, 0.0);
         assert_eq!(est.one_time_cost, 0.0);
         assert_eq!(est.recurring_cost_per_day, 0.0);
@@ -421,10 +424,17 @@ mod tests {
             is_local: false,
             remote_usd_per_gib_per_month: 0.15,
         };
-        let est = model.estimate_cost(ONE_GIB, THIRTY_DAYS_SECS).await.unwrap();
+        let est = model
+            .estimate_cost(ONE_GIB, THIRTY_DAYS_SECS)
+            .await
+            .unwrap();
         // 1 GiB × $0.15/GiB/month × 1 month = $0.15
         let expected = 0.15;
-        assert!((est.total_cost - expected).abs() < 1e-9, "expected {expected}, got {}", est.total_cost);
+        assert!(
+            (est.total_cost - expected).abs() < 1e-9,
+            "expected {expected}, got {}",
+            est.total_cost
+        );
         assert_eq!(est.currency, "USD");
     }
 
@@ -451,7 +461,11 @@ mod tests {
         // size_gib=1, epochs=2880, price=1e9/1e18=1e-9 FIL/GiB/epoch
         // total = 1 * 1e-9 * 2880 = 2.88e-6 FIL
         let expected = 2.88e-6_f64;
-        assert!((est.total_cost - expected).abs() < 1e-12, "expected {expected:.2e}, got {:.2e}", est.total_cost);
+        assert!(
+            (est.total_cost - expected).abs() < 1e-12,
+            "expected {expected:.2e}, got {:.2e}",
+            est.total_cost
+        );
         assert_eq!(est.currency, "FIL");
     }
 
@@ -479,8 +493,11 @@ mod tests {
     #[tokio::test]
     async fn test_arweave_fallback_1gib() {
         let model = ArweaveCostModel::default(); // ar_per_kib = 0.0001
-        // 1 GiB = 1_048_576 KiB → 104.8576 AR
-        let est = model.estimate_cost(ONE_GIB, THIRTY_DAYS_SECS).await.unwrap();
+                                                 // 1 GiB = 1_048_576 KiB → 104.8576 AR
+        let est = model
+            .estimate_cost(ONE_GIB, THIRTY_DAYS_SECS)
+            .await
+            .unwrap();
         let expected = (ONE_GIB as f64 / 1024.0) * 0.0001;
         assert!((est.total_cost - expected).abs() < 1e-6);
         assert_eq!(est.one_time_cost, est.total_cost);
@@ -516,8 +533,14 @@ mod tests {
     #[tokio::test]
     async fn test_arweave_duration_ignored() {
         let model = ArweaveCostModel::default();
-        let est_7d = model.estimate_cost(ONE_GIB, 7 * ONE_DAY_SECS).await.unwrap();
-        let est_365d = model.estimate_cost(ONE_GIB, 365 * ONE_DAY_SECS).await.unwrap();
+        let est_7d = model
+            .estimate_cost(ONE_GIB, 7 * ONE_DAY_SECS)
+            .await
+            .unwrap();
+        let est_365d = model
+            .estimate_cost(ONE_GIB, 365 * ONE_DAY_SECS)
+            .await
+            .unwrap();
         assert_eq!(est_7d.total_cost, est_365d.total_cost);
     }
 
@@ -526,9 +549,21 @@ mod tests {
     #[tokio::test]
     async fn test_compare_sorted_cheapest_first() {
         let mut estimator = CostEstimator::new();
-        estimator.add_model(Box::new(MockModel { name: "expensive", fixed_total: 100.0, currency: "USD" }));
-        estimator.add_model(Box::new(MockModel { name: "cheap", fixed_total: 1.0, currency: "USD" }));
-        estimator.add_model(Box::new(MockModel { name: "mid", fixed_total: 10.0, currency: "USD" }));
+        estimator.add_model(Box::new(MockModel {
+            name: "expensive",
+            fixed_total: 100.0,
+            currency: "USD",
+        }));
+        estimator.add_model(Box::new(MockModel {
+            name: "cheap",
+            fixed_total: 1.0,
+            currency: "USD",
+        }));
+        estimator.add_model(Box::new(MockModel {
+            name: "mid",
+            fixed_total: 10.0,
+            currency: "USD",
+        }));
 
         let results = estimator.compare(ONE_GIB, ONE_DAY_SECS).await;
 
@@ -542,7 +577,11 @@ mod tests {
     async fn test_compare_skips_failing_models() {
         let mut estimator = CostEstimator::new();
         estimator.add_model(Box::new(FailingModel));
-        estimator.add_model(Box::new(MockModel { name: "ok", fixed_total: 5.0, currency: "USD" }));
+        estimator.add_model(Box::new(MockModel {
+            name: "ok",
+            fixed_total: 5.0,
+            currency: "USD",
+        }));
 
         let results = estimator.compare(ONE_GIB, ONE_DAY_SECS).await;
 
@@ -561,10 +600,22 @@ mod tests {
     async fn test_compare_skips_cross_currency() {
         let mut estimator = CostEstimator::new();
         // All USD: cheap=1.0 USD, mid=10.0 USD
-        estimator.add_model(Box::new(MockModel { name: "usd_cheap", fixed_total: 1.0, currency: "USD" }));
-        estimator.add_model(Box::new(MockModel { name: "usd_mid", fixed_total: 10.0, currency: "USD" }));
+        estimator.add_model(Box::new(MockModel {
+            name: "usd_cheap",
+            fixed_total: 1.0,
+            currency: "USD",
+        }));
+        estimator.add_model(Box::new(MockModel {
+            name: "usd_mid",
+            fixed_total: 10.0,
+            currency: "USD",
+        }));
         // Different currency: 0.001 FIL (looks cheaper in raw number but incomparable)
-        estimator.add_model(Box::new(MockModel { name: "fil_tiny", fixed_total: 0.001, currency: "FIL" }));
+        estimator.add_model(Box::new(MockModel {
+            name: "fil_tiny",
+            fixed_total: 0.001,
+            currency: "FIL",
+        }));
 
         let results = estimator.compare(ONE_GIB, ONE_DAY_SECS).await;
 
@@ -579,8 +630,16 @@ mod tests {
     #[tokio::test]
     async fn test_cheapest_provider_no_constraints() {
         let mut estimator = CostEstimator::new();
-        estimator.add_model(Box::new(MockModel { name: "a", fixed_total: 50.0, currency: "USD" }));
-        estimator.add_model(Box::new(MockModel { name: "b", fixed_total: 5.0, currency: "USD" }));
+        estimator.add_model(Box::new(MockModel {
+            name: "a",
+            fixed_total: 50.0,
+            currency: "USD",
+        }));
+        estimator.add_model(Box::new(MockModel {
+            name: "b",
+            fixed_total: 5.0,
+            currency: "USD",
+        }));
 
         let result = estimator
             .cheapest_provider(ONE_GIB, ONE_DAY_SECS, &HashMap::new(), None)
@@ -593,8 +652,16 @@ mod tests {
     #[tokio::test]
     async fn test_cheapest_provider_skips_unhealthy() {
         let mut estimator = CostEstimator::new();
-        estimator.add_model(Box::new(MockModel { name: "a", fixed_total: 1.0, currency: "USD" }));
-        estimator.add_model(Box::new(MockModel { name: "b", fixed_total: 10.0, currency: "USD" }));
+        estimator.add_model(Box::new(MockModel {
+            name: "a",
+            fixed_total: 1.0,
+            currency: "USD",
+        }));
+        estimator.add_model(Box::new(MockModel {
+            name: "b",
+            fixed_total: 10.0,
+            currency: "USD",
+        }));
 
         let mut health = HashMap::new();
         health.insert("a".to_string(), false); // cheapest is unhealthy
@@ -610,9 +677,21 @@ mod tests {
     #[tokio::test]
     async fn test_cheapest_provider_budget_filter() {
         let mut estimator = CostEstimator::new();
-        estimator.add_model(Box::new(MockModel { name: "a", fixed_total: 1.0, currency: "USD" }));
-        estimator.add_model(Box::new(MockModel { name: "b", fixed_total: 10.0, currency: "USD" }));
-        estimator.add_model(Box::new(MockModel { name: "c", fixed_total: 100.0, currency: "USD" }));
+        estimator.add_model(Box::new(MockModel {
+            name: "a",
+            fixed_total: 1.0,
+            currency: "USD",
+        }));
+        estimator.add_model(Box::new(MockModel {
+            name: "b",
+            fixed_total: 10.0,
+            currency: "USD",
+        }));
+        estimator.add_model(Box::new(MockModel {
+            name: "c",
+            fixed_total: 100.0,
+            currency: "USD",
+        }));
 
         // Budget of $5 — "a" ($1) fits, "b" ($10) does not
         let result = estimator
@@ -626,7 +705,11 @@ mod tests {
     #[tokio::test]
     async fn test_cheapest_provider_all_over_budget() {
         let mut estimator = CostEstimator::new();
-        estimator.add_model(Box::new(MockModel { name: "x", fixed_total: 999.0, currency: "USD" }));
+        estimator.add_model(Box::new(MockModel {
+            name: "x",
+            fixed_total: 999.0,
+            currency: "USD",
+        }));
 
         let result = estimator
             .cheapest_provider(ONE_GIB, ONE_DAY_SECS, &HashMap::new(), Some(1.0))
@@ -638,7 +721,11 @@ mod tests {
     #[tokio::test]
     async fn test_cheapest_provider_all_unhealthy() {
         let mut estimator = CostEstimator::new();
-        estimator.add_model(Box::new(MockModel { name: "x", fixed_total: 1.0, currency: "USD" }));
+        estimator.add_model(Box::new(MockModel {
+            name: "x",
+            fixed_total: 1.0,
+            currency: "USD",
+        }));
 
         let mut health = HashMap::new();
         health.insert("x".to_string(), false);
@@ -653,7 +740,11 @@ mod tests {
     #[tokio::test]
     async fn test_cheapest_provider_absent_from_health_map_assumed_healthy() {
         let mut estimator = CostEstimator::new();
-        estimator.add_model(Box::new(MockModel { name: "unknown", fixed_total: 3.0, currency: "USD" }));
+        estimator.add_model(Box::new(MockModel {
+            name: "unknown",
+            fixed_total: 3.0,
+            currency: "USD",
+        }));
 
         // Provider not in health map → assumed healthy
         let result = estimator

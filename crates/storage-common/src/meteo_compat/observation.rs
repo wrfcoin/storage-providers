@@ -151,7 +151,8 @@ impl WeatherObservation {
             self.precipitation_mm.map(|v| (0.0..=500.0).contains(&v)),
             self.dewpoint_c.map(|v| (-80.0..=35.0).contains(&v)),
             self.visibility_m.map(|v| (0.0..=100_000.0).contains(&v)),
-            self.solar_radiation_wm2.map(|v| (0.0..=1400.0).contains(&v)),
+            self.solar_radiation_wm2
+                .map(|v| (0.0..=1400.0).contains(&v)),
             self.cloud_cover_oktas.map(|v| v <= 8),
         ];
         if !basic_checks.iter().all(|c| c.unwrap_or(true)) {

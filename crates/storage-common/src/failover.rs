@@ -162,19 +162,11 @@ impl FailoverRouter {
     }
 
     /// Register a provider. Lower `priority` values are tried first.
-    pub fn add_provider(
-        &mut self,
-        name: &str,
-        provider: Arc<dyn StorageProvider>,
-        priority: u32,
-    ) {
+    pub fn add_provider(&mut self, name: &str, provider: Arc<dyn StorageProvider>, priority: u32) {
         self.providers.push(ProviderEntry {
             name: name.to_string(),
             provider,
-            circuit_breaker: Mutex::new(CircuitBreaker::new(
-                self.failure_threshold,
-                self.cooldown,
-            )),
+            circuit_breaker: Mutex::new(CircuitBreaker::new(self.failure_threshold, self.cooldown)),
             priority,
         });
         // Keep sorted by priority (stable — insertion order breaks ties).
@@ -184,11 +176,7 @@ impl FailoverRouter {
     /// Store data, trying providers in priority order.
     ///
     /// Returns the [`ContentId`] from the first provider that succeeds.
-    pub async fn store(
-        &self,
-        data: &[u8],
-        metadata: &Metadata,
-    ) -> Result<ContentId, StorageError> {
+    pub async fn store(&self, data: &[u8], metadata: &Metadata) -> Result<ContentId, StorageError> {
         let store_start = Instant::now();
         {
             let mut m = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
@@ -201,7 +189,10 @@ impl FailoverRouter {
         for entry in &self.providers {
             // Check circuit breaker availability.
             {
-                let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
+                let mut cb = entry
+                    .circuit_breaker
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
                 if !cb.is_available() {
                     continue;
                 }
@@ -210,7 +201,10 @@ impl FailoverRouter {
             match entry.provider.store(data, metadata).await {
                 Ok(cid) => {
                     {
-                        let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut cb = entry
+                            .circuit_breaker
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
                         cb.record_success();
                     }
                     {
@@ -227,7 +221,10 @@ impl FailoverRouter {
                 }
                 Err(e) => {
                     {
-                        let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut cb = entry
+                            .circuit_breaker
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
                         cb.record_failure();
                     }
                     last_err = Some(e);
@@ -241,9 +238,8 @@ impl FailoverRouter {
             m.total_failures += 1;
         }
 
-        Err(last_err.unwrap_or_else(|| {
-            StorageError::ProviderError("no providers available".into())
-        }))
+        Err(last_err
+            .unwrap_or_else(|| StorageError::ProviderError("no providers available".into())))
     }
 
     /// Retrieve data with optional integrity verification.
@@ -266,7 +262,10 @@ impl FailoverRouter {
 
         for entry in &self.providers {
             {
-                let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
+                let mut cb = entry
+                    .circuit_breaker
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
                 if !cb.is_available() {
                     continue;
                 }
@@ -282,7 +281,10 @@ impl FailoverRouter {
                             m.integrity_failures += 1;
                             drop(m);
                             {
-                                let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
+                                let mut cb = entry
+                                    .circuit_breaker
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner());
                                 cb.record_failure();
                             }
                             last_err = Some(StorageError::InvalidData(format!(
@@ -295,7 +297,10 @@ impl FailoverRouter {
                     }
 
                     {
-                        let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut cb = entry
+                            .circuit_breaker
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
                         cb.record_success();
                     }
                     {
@@ -310,7 +315,10 @@ impl FailoverRouter {
                 }
                 Err(e) => {
                     {
-                        let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut cb = entry
+                            .circuit_breaker
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
                         cb.record_failure();
                     }
                     last_err = Some(e);
@@ -324,16 +332,18 @@ impl FailoverRouter {
             m.total_failures += 1;
         }
 
-        Err(last_err.unwrap_or_else(|| {
-            StorageError::ProviderError("no providers available".into())
-        }))
+        Err(last_err
+            .unwrap_or_else(|| StorageError::ProviderError("no providers available".into())))
     }
 
     /// Check whether content exists on any available provider.
     pub async fn exists(&self, id: &ContentId) -> Result<bool, StorageError> {
         for entry in &self.providers {
             {
-                let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
+                let mut cb = entry
+                    .circuit_breaker
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
                 if !cb.is_available() {
                     continue;
                 }
@@ -341,17 +351,26 @@ impl FailoverRouter {
 
             match entry.provider.exists(id).await {
                 Ok(true) => {
-                    let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut cb = entry
+                        .circuit_breaker
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
                     cb.record_success();
                     return Ok(true);
                 }
                 Ok(false) => {
-                    let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut cb = entry
+                        .circuit_breaker
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
                     cb.record_success();
                     // Content might exist on another provider.
                 }
                 Err(_) => {
-                    let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut cb = entry
+                        .circuit_breaker
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
                     cb.record_failure();
                 }
             }
@@ -372,7 +391,10 @@ impl FailoverRouter {
 
     /// Return a snapshot of the current failover metrics.
     pub fn metrics(&self) -> FailoverMetrics {
-        self.metrics.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.metrics
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 }
 
@@ -382,11 +404,7 @@ impl FailoverRouter {
 
 #[async_trait]
 impl StorageProvider for FailoverRouter {
-    async fn store(
-        &self,
-        data: &[u8],
-        metadata: &Metadata,
-    ) -> Result<ContentId, StorageError> {
+    async fn store(&self, data: &[u8], metadata: &Metadata) -> Result<ContentId, StorageError> {
         FailoverRouter::store(self, data, metadata).await
     }
 
@@ -406,27 +424,35 @@ impl StorageProvider for FailoverRouter {
         let mut last_err: Option<StorageError> = None;
         for entry in &self.providers {
             {
-                let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
+                let mut cb = entry
+                    .circuit_breaker
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
                 if !cb.is_available() {
                     continue;
                 }
             }
             match entry.provider.delete(id).await {
                 Ok(()) => {
-                    let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut cb = entry
+                        .circuit_breaker
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
                     cb.record_success();
                     return Ok(());
                 }
                 Err(e) => {
-                    let mut cb = entry.circuit_breaker.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut cb = entry
+                        .circuit_breaker
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
                     cb.record_failure();
                     last_err = Some(e);
                 }
             }
         }
-        Err(last_err.unwrap_or_else(|| {
-            StorageError::ProviderError("no providers available".into())
-        }))
+        Err(last_err
+            .unwrap_or_else(|| StorageError::ProviderError("no providers available".into())))
     }
 
     async fn health_check(&self) -> Result<HealthStatus, StorageError> {
