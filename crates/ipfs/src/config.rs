@@ -23,17 +23,26 @@ pub struct IpfsConfig {
     pub api_token: Option<String>,
 }
 
-impl Default for IpfsConfig {
-    fn default() -> Self {
+impl IpfsConfig {
+    /// Self-hosted testnet configuration: never reads credentials from the environment.
+    pub fn unauthenticated(api_url: String) -> Self {
         Self {
-            api_url: "http://localhost:5001".to_string(),
+            api_url,
             gateway_url: "http://localhost:8080".to_string(),
             timeout_secs: 30,
             max_connections: 10,
             pin_by_default: true,
             cache_capacity: 10_000,
             cache_ttl_secs: 3600,
-            api_token: std::env::var("IPFS_API_TOKEN").ok(),
+            api_token: None,
         }
+    }
+}
+
+impl Default for IpfsConfig {
+    fn default() -> Self {
+        let mut config = Self::unauthenticated("http://localhost:5001".into());
+        config.api_token = std::env::var("IPFS_API_TOKEN").ok();
+        config
     }
 }

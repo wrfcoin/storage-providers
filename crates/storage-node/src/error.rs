@@ -10,7 +10,11 @@ pub struct ApiError(pub StorageError);
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        if let StorageError::NotInTestnet { ref provider } = self.0 {
+            return (StatusCode::NOT_IMPLEMENTED, Json(json!({"unavailable": true, "provider": provider, "reason": "not in this testnet"}))).into_response();
+        }
         let (status, error_message) = match self.0 {
+            StorageError::NotInTestnet { .. } => unreachable!("handled above"),
             StorageError::NotFound(ref msg) => (StatusCode::NOT_FOUND, msg.clone()),
             StorageError::PermissionDenied(ref msg) => (StatusCode::FORBIDDEN, msg.clone()),
             StorageError::CapacityExceeded => (
