@@ -73,8 +73,7 @@ impl DataBundler {
                 }
             }
             BundlingStrategy::Smart => {
-                let total_bytes: u64 =
-                    self.pending_items.iter().map(|i| i.data.len() as u64).sum();
+                let total_bytes: u64 = self.pending_items.iter().map(|i| i.data.len() as u64).sum();
                 let oldest = self
                     .pending_items
                     .first()
@@ -139,14 +138,18 @@ mod tests {
         let mut b = DataBundler::new(BundlingStrategy::TimeWindow { secs: 60 });
         b.add_item(item("1", b"data", 100));
         assert!(!b.should_flush(150)); // 50 < 60
-        assert!(b.should_flush(160));  // 60 >= 60
+        assert!(b.should_flush(160)); // 60 >= 60
     }
 
     #[test]
     fn test_smart_strategy_size() {
         let mut b = DataBundler::new(BundlingStrategy::Smart);
         let big = vec![0u8; 1_048_576]; // 1 MiB
-        b.add_item(BundleItem { id: "big".to_string(), data: big, added_at: 0 });
+        b.add_item(BundleItem {
+            id: "big".to_string(),
+            data: big,
+            added_at: 0,
+        });
         assert!(b.should_flush(0)); // >= 1 MiB
     }
 
@@ -154,8 +157,8 @@ mod tests {
     fn test_smart_strategy_age() {
         let mut b = DataBundler::new(BundlingStrategy::Smart);
         b.add_item(item("1", b"small", 0));
-        assert!(!b.should_flush(100));  // 100 < 300
-        assert!(b.should_flush(300));   // 300 >= 300
+        assert!(!b.should_flush(100)); // 100 < 300
+        assert!(b.should_flush(300)); // 300 >= 300
     }
 
     #[test]

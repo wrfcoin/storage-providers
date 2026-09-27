@@ -182,7 +182,10 @@ mod tests {
 
     #[test]
     fn test_select_peers_near_sorts_by_distance() {
-        let config = IpfsClusterConfig { replication_factor: 2, ..Default::default() };
+        let config = IpfsClusterConfig {
+            replication_factor: 2,
+            ..Default::default()
+        };
         let mut cm = ClusterManager::new(config).unwrap();
         cm.add_peer(peer("far", 90.0, 90.0)).unwrap();
         cm.add_peer(peer("near", 1.0, 1.0)).unwrap();
@@ -203,7 +206,10 @@ mod tests {
 
     #[test]
     fn test_replication_factor() {
-        let config = IpfsClusterConfig { replication_factor: 5, ..Default::default() };
+        let config = IpfsClusterConfig {
+            replication_factor: 5,
+            ..Default::default()
+        };
         let cm = ClusterManager::new(config).unwrap();
         assert_eq!(cm.replication_factor(), 5);
     }

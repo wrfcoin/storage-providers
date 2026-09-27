@@ -14,13 +14,13 @@
 //! println!("Archived receipt at {}", cid);
 //! ```
 
+pub mod archiver;
 mod canonical;
 mod receipt;
-pub mod archiver;
 
-pub use canonical::{canonical_json, CanonicalError};
-pub use receipt::{ForecastVerificationReceipt, ForecastAccuracyMetrics};
 pub use archiver::{archive_receipt, ArchiveError};
+pub use canonical::{canonical_json, CanonicalError};
+pub use receipt::{ForecastAccuracyMetrics, ForecastVerificationReceipt};
 
 #[cfg(test)]
 mod tests {
@@ -32,7 +32,10 @@ mod tests {
         let receipt: serde_json::Value = serde_json::from_str(json).unwrap();
         let canonical1 = canonical_json(&receipt).unwrap();
         let canonical2 = canonical_json(&receipt).unwrap();
-        assert_eq!(canonical1, canonical2, "canonical JSON must be deterministic");
+        assert_eq!(
+            canonical1, canonical2,
+            "canonical JSON must be deterministic"
+        );
     }
 
     #[test]
@@ -48,6 +51,10 @@ mod tests {
         let a_pos = canonical_str.find("\"a\"").unwrap();
         let m_pos = canonical_str.find("\"m\"").unwrap();
         let z_pos = canonical_str.find("\"z\"").unwrap();
-        assert!(a_pos < m_pos && m_pos < z_pos, "keys must be sorted: {}", canonical_str);
+        assert!(
+            a_pos < m_pos && m_pos < z_pos,
+            "keys must be sorted: {}",
+            canonical_str
+        );
     }
 }

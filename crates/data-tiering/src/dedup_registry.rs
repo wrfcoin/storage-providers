@@ -80,7 +80,9 @@ impl RegistryEntry {
 
     /// Get mutable replica for a specific provider.
     pub fn get_provider_mut(&mut self, provider_id: &str) -> Option<&mut ProviderReplica> {
-        self.providers.iter_mut().find(|p| p.provider_id == provider_id)
+        self.providers
+            .iter_mut()
+            .find(|p| p.provider_id == provider_id)
     }
 
     /// Add a new provider replica (returns false if provider already exists).
@@ -93,7 +95,11 @@ impl RegistryEntry {
         if self.has_provider(&provider_id) {
             return false;
         }
-        self.providers.push(ProviderReplica::new(provider_id, storage_location, pinned_at));
+        self.providers.push(ProviderReplica::new(
+            provider_id,
+            storage_location,
+            pinned_at,
+        ));
         true
     }
 
@@ -193,17 +199,15 @@ impl PersistentDedupRegistry {
             .write()
             .map_err(|e| DedupError::InvalidState(e.to_string()))?;
 
-        let entry = cache
-            .entry(content_hash.clone())
-            .or_insert_with(|| {
-                RegistryEntry::new(
-                    content_hash.clone(),
-                    size_bytes,
-                    provider_id.clone(),
-                    storage_location.clone(),
-                    timestamp,
-                )
-            });
+        let entry = cache.entry(content_hash.clone()).or_insert_with(|| {
+            RegistryEntry::new(
+                content_hash.clone(),
+                size_bytes,
+                provider_id.clone(),
+                storage_location.clone(),
+                timestamp,
+            )
+        });
 
         let _is_new_provider = entry.add_provider(provider_id, storage_location, timestamp);
 
@@ -410,7 +414,9 @@ pub mod gc_adapter {
 
     /// Integration point for garbage collection orphan detection.
     /// The GC should call this method to find candidates for deletion.
-    pub fn get_orphaned_hashes(registry: &PersistentDedupRegistry) -> Result<Vec<String>, DedupError> {
+    pub fn get_orphaned_hashes(
+        registry: &PersistentDedupRegistry,
+    ) -> Result<Vec<String>, DedupError> {
         registry.orphans()
     }
 

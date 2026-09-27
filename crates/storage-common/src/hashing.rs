@@ -126,14 +126,16 @@ mod tests {
     // ---- observation_content_id tests ----
 
     fn sample_report() -> crate::types::EnvironmentalReport {
-        use crate::types::{
-            EnvironmentalDomain, GeoLocation, ReportPayload, WeatherPayload,
-        };
+        use crate::types::{EnvironmentalDomain, GeoLocation, ReportPayload, WeatherPayload};
         crate::types::EnvironmentalReport {
             report_id: "hash-test-001".to_string(),
             domain: EnvironmentalDomain::Weather,
             station_id: "stn-hash-1".to_string(),
-            location: GeoLocation { latitude: 40.0, longitude: -105.0, altitude_m: None },
+            location: GeoLocation {
+                latitude: 40.0,
+                longitude: -105.0,
+                altitude_m: None,
+            },
             observed_at: 1_000_000,
             submitted_at: 1_000_001,
             payload: ReportPayload::Weather(WeatherPayload {
@@ -169,7 +171,10 @@ mod tests {
         report_b.report_id = "hash-test-002".to_string();
         let cid_a = observation_content_id(&report_a).unwrap();
         let cid_b = observation_content_id(&report_b).unwrap();
-        assert_ne!(cid_a, cid_b, "different reports must produce different CIDs");
+        assert_ne!(
+            cid_a, cid_b,
+            "different reports must produce different CIDs"
+        );
     }
 
     #[test]

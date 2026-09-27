@@ -1,19 +1,19 @@
+mod error;
 mod handlers;
 mod state;
-mod error;
 
 use axum::{
     routing::{delete, get, post},
     Router,
 };
+use prometheus::{Counter, Registry};
+use serde::{Deserialize, Serialize};
+use std::fs;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber;
-use serde::{Deserialize, Serialize};
-use std::fs;
-use prometheus::{Counter, Registry};
 
 /// Configuration for storage node from TOML file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,15 +112,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/health", get(handlers::health_check))
         .route("/stats", get(handlers::stats))
-        .route("/metrics", get(move || {
-            let reg = registry_clone.clone();
-            async move {
-                use prometheus::TextEncoder;
-                TextEncoder::new()
-                    .encode_to_string(&reg.gather())
-                    .unwrap_or_default()
-            }
-        }))
+        .route(
+            "/metrics",
+            get(move || {
+                let reg = registry_clone.clone();
+                async move {
+                    use prometheus::TextEncoder;
+                    TextEncoder::new()
+                        .encode_to_string(&reg.gather())
+                        .unwrap_or_default()
+                }
+            }),
+        )
         .route("/api/store", post(handlers::store))
         .route("/api/retrieve/:id", get(handlers::retrieve))
         .route("/api/delete/:id", delete(handlers::delete))
@@ -146,8 +149,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(unix)]
         {
             use tokio::signal::unix::{signal, SignalKind};
-            let mut sigterm = signal(SignalKind::terminate())
-                .expect("Failed to setup SIGTERM handler");
+            let mut sigterm =
+                signal(SignalKind::terminate()).expect("Failed to setup SIGTERM handler");
             sigterm.recv().await;
             tracing::info!("SIGTERM received, initiating graceful shutdown...");
         }

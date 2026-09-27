@@ -119,9 +119,7 @@ mod tests {
         assert_eq!(index.query_by_domain(&EnvironmentalDomain::Soil).len(), 2);
         assert_eq!(index.query_by_domain(&EnvironmentalDomain::Ocean).len(), 1);
         assert_eq!(
-            index
-                .query_by_domain(&EnvironmentalDomain::Hydrology)
-                .len(),
+            index.query_by_domain(&EnvironmentalDomain::Hydrology).len(),
             0
         );
     }

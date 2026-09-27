@@ -9,8 +9,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
-use wrfcoin_storage_common::{ContentId, Metadata, StorageStats, hashing::{ipfs_content_id, filecoin_content_id, sha256_digest}};
 use wrfcoin_data_tiering::{AnalyticsInput, InMemoryMetrics, ProviderInput, StorageSnapshot};
+use wrfcoin_storage_common::{
+    hashing::{filecoin_content_id, ipfs_content_id, sha256_digest},
+    ContentId, Metadata, StorageStats,
+};
 
 use crate::error::ApiError;
 use crate::state::AppState;
@@ -147,20 +150,27 @@ pub async fn store(
 ) -> Result<(StatusCode, Json<StoreResponse>), ApiError> {
     // Decode base64 data
     let engine = base64::engine::general_purpose::STANDARD;
-    let data = engine.decode(&req.data)
-        .map_err(|e| ApiError(wrfcoin_storage_common::error::StorageError::InvalidData(
+    let data = engine.decode(&req.data).map_err(|e| {
+        ApiError(wrfcoin_storage_common::error::StorageError::InvalidData(
             format!("Invalid base64 encoding: {}", e),
-        )))?;
+        ))
+    })?;
 
     // Enforce maximum upload size
     if (data.len() as u64) > MAX_UPLOAD_BYTES {
-        return Err(ApiError(wrfcoin_storage_common::error::StorageError::InvalidData(
-            format!("Upload exceeds maximum size of {} bytes", MAX_UPLOAD_BYTES),
-        )));
+        return Err(ApiError(
+            wrfcoin_storage_common::error::StorageError::InvalidData(format!(
+                "Upload exceeds maximum size of {} bytes",
+                MAX_UPLOAD_BYTES
+            )),
+        ));
     }
 
     // Determine which provider to use
-    let provider_name = req.provider.as_deref().unwrap_or(app_state.default_provider_name());
+    let provider_name = req
+        .provider
+        .as_deref()
+        .unwrap_or(app_state.default_provider_name());
 
     let provider = app_state.get_provider(provider_name)?;
 
@@ -285,18 +295,22 @@ fn parse_content_id(id: &str) -> Result<ContentId, ApiError> {
     match id.split_once(':') {
         Some((provider, hash)) => {
             if provider.is_empty() || hash.is_empty() {
-                return Err(ApiError(wrfcoin_storage_common::error::StorageError::InvalidData(
-                    "Content ID must be in format 'provider:hash'".to_string(),
-                )));
+                return Err(ApiError(
+                    wrfcoin_storage_common::error::StorageError::InvalidData(
+                        "Content ID must be in format 'provider:hash'".to_string(),
+                    ),
+                ));
             }
             Ok(ContentId {
                 provider: provider.to_string(),
                 hash: hash.to_string(),
             })
         }
-        None => Err(ApiError(wrfcoin_storage_common::error::StorageError::InvalidData(
-            "Content ID must be in format 'provider:hash'".to_string(),
-        ))),
+        None => Err(ApiError(
+            wrfcoin_storage_common::error::StorageError::InvalidData(
+                "Content ID must be in format 'provider:hash'".to_string(),
+            ),
+        )),
     }
 }
 
@@ -322,12 +336,12 @@ fn verify_content_id(expected: &ContentId, data: &[u8]) -> Result<(), ApiError> 
     if computed.hash == expected.hash {
         Ok(())
     } else {
-        Err(ApiError(wrfcoin_storage_common::error::StorageError::InvalidData(
-            format!(
+        Err(ApiError(
+            wrfcoin_storage_common::error::StorageError::InvalidData(format!(
                 "CID mismatch: expected {}, computed {}",
                 expected.hash, computed.hash
-            ),
-        )))
+            )),
+        ))
     }
 }
 
@@ -361,7 +375,10 @@ pub async fn cost_estimate(
     Query(q): Query<CostEstimateQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let duration_secs = q.duration_secs.unwrap_or(86_400);
-    let ranked = app_state.cost_estimator.compare(q.size_bytes, duration_secs).await;
+    let ranked = app_state
+        .cost_estimator
+        .compare(q.size_bytes, duration_secs)
+        .await;
 
     let estimates: Vec<serde_json::Value> = ranked
         .into_iter()
@@ -391,14 +408,17 @@ pub async fn cost_cheapest(
     let duration_secs = q.duration_secs.unwrap_or(86_400);
 
     // Build a health map from current provider health checks.
-    let provider_names: Vec<String> = app_state.provider_names()
+    let provider_names: Vec<String> = app_state
+        .provider_names()
         .into_iter()
         .map(String::from)
         .collect();
     let mut health_map: HashMap<String, bool> = HashMap::new();
     for name in &provider_names {
         if let Ok(provider) = app_state.get_provider(name) {
-            let healthy = provider.health_check().await
+            let healthy = provider
+                .health_check()
+                .await
                 .map(|h| h.healthy)
                 .unwrap_or(false);
             health_map.insert(name.clone(), healthy);
@@ -420,9 +440,11 @@ pub async fn cost_cheapest(
                 .unwrap()
                 .as_secs(),
         }))),
-        None => Err(ApiError(wrfcoin_storage_common::error::StorageError::ProviderError(
-            "No healthy provider found within budget constraints".to_string(),
-        ))),
+        None => Err(ApiError(
+            wrfcoin_storage_common::error::StorageError::ProviderError(
+                "No healthy provider found within budget constraints".to_string(),
+            ),
+        )),
     }
 }
 
@@ -435,7 +457,8 @@ pub async fn cost_cheapest(
 pub async fn analytics_snapshot(
     State(app_state): State<Arc<AppState>>,
 ) -> Result<Json<StorageSnapshot>, ApiError> {
-    let provider_names: Vec<String> = app_state.provider_names()
+    let provider_names: Vec<String> = app_state
+        .provider_names()
         .into_iter()
         .map(String::from)
         .collect();
@@ -444,7 +467,9 @@ pub async fn analytics_snapshot(
     let mut health_map: HashMap<String, bool> = HashMap::new();
     for name in &provider_names {
         if let Ok(provider) = app_state.get_provider(name) {
-            let healthy = provider.health_check().await
+            let healthy = provider
+                .health_check()
+                .await
                 .map(|h| h.healthy)
                 .unwrap_or(false);
             health_map.insert(name.clone(), healthy);
@@ -454,15 +479,19 @@ pub async fn analytics_snapshot(
     // Phase 2 — sync: collect cloned stats (lock acquired + released immediately).
     let stats_clones: Vec<StorageStats> = {
         let stats_map = app_state.provider_stats.lock().unwrap();
-        provider_names.iter()
+        provider_names
+            .iter()
             .map(|name| stats_map.get(name.as_str()).cloned().unwrap_or_default())
             .collect()
     };
 
     // Collect Arc<InMemoryMetrics> — no lock needed (provider_metrics is Arc<HashMap>).
-    let metrics_arcs: Vec<Arc<InMemoryMetrics>> = provider_names.iter()
+    let metrics_arcs: Vec<Arc<InMemoryMetrics>> = provider_names
+        .iter()
         .map(|name| {
-            app_state.provider_metrics.get(name.as_str())
+            app_state
+                .provider_metrics
+                .get(name.as_str())
                 .cloned()
                 .unwrap_or_else(|| Arc::new(InMemoryMetrics::new()))
         })
@@ -474,7 +503,8 @@ pub async fn analytics_snapshot(
         let domain_index = app_state.domain_index.lock().unwrap();
         let failover = app_state.failover_metrics.lock().unwrap();
 
-        let provider_inputs: Vec<ProviderInput<'_>> = provider_names.iter()
+        let provider_inputs: Vec<ProviderInput<'_>> = provider_names
+            .iter()
             .enumerate()
             .map(|(i, name)| ProviderInput {
                 name: name.as_str(),

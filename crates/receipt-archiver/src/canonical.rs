@@ -109,7 +109,10 @@ mod tests {
         let canonical1 = canonical_json(&value1).unwrap();
         let canonical2 = canonical_json(&value2).unwrap();
 
-        assert_eq!(canonical1, canonical2, "identical inputs must produce identical canonical output");
+        assert_eq!(
+            canonical1, canonical2,
+            "identical inputs must produce identical canonical output"
+        );
     }
 
     #[test]
@@ -132,7 +135,10 @@ mod tests {
         // Check that nested keys are sorted (z_key before a_key is wrong, a_key should come first).
         let a_key_idx = canonical_str.find("\"a_key\"").unwrap();
         let z_key_idx = canonical_str.find("\"z_key\"").unwrap();
-        assert!(a_key_idx < z_key_idx, "a_key should come before z_key in nested object");
+        assert!(
+            a_key_idx < z_key_idx,
+            "a_key should come before z_key in nested object"
+        );
     }
 
     #[test]
@@ -152,7 +158,10 @@ mod tests {
         let canonical_str = String::from_utf8(canonical).unwrap();
 
         // No unnecessary whitespace.
-        assert!(!canonical_str.contains(" "), "canonical JSON should have no whitespace");
+        assert!(
+            !canonical_str.contains(" "),
+            "canonical JSON should have no whitespace"
+        );
     }
 
     #[test]
