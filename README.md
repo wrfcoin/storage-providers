@@ -3,7 +3,7 @@
 [![Rust 1.70+](https://img.shields.io/badge/Rust-1.70%2B-000000?logo=rust)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-**Decentralized Storage Ecosystem** for the WRFCoin platform. This repository provides high-performance Rust integrations for IPFS, Filecoin, and Arweave, managed by a sophisticated hot/warm/cold data tiering orchestrator.
+Storage clients and tiering libraries for WRFCoin. The default storage-node testnet profile enables only a self-hosted Kubo/IPFS node. Filecoin and Arweave are not in this testnet.
 
 ## 🏗 Architecture
 
@@ -13,8 +13,8 @@ The storage ecosystem is designed as a modular Rust workspace, ensuring type-saf
 
 - **`storage-common`**: The foundation of the workspace. Defines the core `StorageProvider` and `ContentAddressed` traits, shared types (EnvironmentalReport, Metadata), error handling, and cryptographic integrity verification.
 - **`ipfs`**: Hot/Warm storage provider. Handles rapid ingestion and retrieval of weather data blobs using Content Identifiers (CIDs).
-- **`filecoin`**: Cold storage provider. Manages long-term archival of historical datasets through automated storage deal negotiation.
-- **`arweave`**: Permanent storage provider. Ensures climate records and critical environmental evidence are stored forever on a permaweb layer.
+- **`filecoin`**: Incomplete client; not in this testnet.
+- **`arweave`**: Incomplete client; not in this testnet.
 - **`data-tiering`**: The orchestrator. Implements intelligent migration of data between tiers based on age, frequency of access, and provenance policies.
 
 ## 📡 Data Tiering Model
@@ -23,8 +23,8 @@ The storage ecosystem is designed as a modular Rust workspace, ensuring type-saf
 |------|----------|----------------|------------------|
 | **Hot** | Local Cache / Redis | < 100ms | Real-time weather observations |
 | **Warm** | IPFS | < 5s | Active datasets and peer-to-peer sharing |
-| **Cold** | Filecoin | Minutes | Historical archival and bulk data backup |
-| **Archive** | Arweave | Minutes | Permanent, immutable climate benchmarks |
+| **Cold** | Filecoin | Unavailable | Not in this testnet |
+| **Archive** | Arweave | Unavailable | Not in this testnet |
 
 ## 🛡 Advanced Features
 
@@ -38,7 +38,7 @@ The storage ecosystem is designed as a modular Rust workspace, ensuring type-saf
 ### Prerequisites
 - **Rust**: 1.70+ (Stable)
 - **IPFS Node**: Required for local testing of the IPFS provider.
-- **Arweave/Filecoin API Keys**: Required for integration testing.
+- **Credentials**: None for the testnet profile. Tests use loopback mocks.
 
 ### Installation
 ```bash
@@ -87,3 +87,36 @@ module when that ownership question is resolved.
 
 Built with ❤️ for the global weather community.  
 Part of the WRFCoin platform.
+
+## IPFS-only testnet daemon
+
+`STORAGE_NODE_PROFILE=testnet` is the default. It enables only `ipfs`; specifying
+Filecoin or Arweave in `STORAGE_PROVIDERS` refuses startup. The testnet IPFS config
+never reads API tokens; `IPFS_REMOTE_PINNING` is ignored with a warning, and remote
+pinning clients are never constructed. `IPFS_IS_LOCAL=false` cannot enable paid
+cost models in this profile. No wallet, remote gateway or paid pinning service is
+required. Use a Kubo endpoint you operate.
+
+`STORAGE_NODE_CONFIG=config/testnet.toml` loads the checked-in example (Kubo at
+`http://ipfs:5001`, as a local compose service). For a native local Kubo, set
+`IPFS_API_URL=http://127.0.0.1:5001`; this overrides the TOML IPFS endpoint.
+The daemon requires successful Kubo uploads, and probes `/api/v0/id` with a
+2-second timeout. `/health` returns 503 on probe failure. Kubo validates its
+content-addressed blocks; the daemon preserves Kubo CIDs across reads rather
+than comparing them to a different locally constructed identifier.
+
+`/health` and `/stats` list all three provider postures. Filecoin/Arweave are
+`not_in_testnet` with `healthy:null`; stats never invents probe results.
+Store/retrieve requests selecting these providers return HTTP 501 with
+`unavailable:true`, provider and reason. Cost endpoints include only active
+providers and mark results `estimate_only:true`.
+
+`STORAGE_NODE_PROFILE=full` is an experimental library-integration mode, not a
+paid-provider readiness claim. Incomplete providers report `misconfigured` and
+are excluded from cost estimates; missing analytics probes are unhealthy.
+
+Build locally: `docker build -t storage-node:testnet .`. The multi-stage image
+uses locked Cargo dependencies and a distroless non-root runtime. Building does
+not deploy or push the image. Test the actual daemon without live services:
+`cargo test -p wrfcoin-storage-node --test ipfs_only_profile` (seven loopback tests).
+The repository has no CT102 runner; report these tests as local evidence.

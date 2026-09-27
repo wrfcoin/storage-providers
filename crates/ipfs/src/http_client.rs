@@ -19,6 +19,7 @@ pub struct AddResponse {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct IdResponse {
+    #[serde(rename = "ID", alias = "Id")]
     pub id: String,
     pub agent_version: Option<String>,
 }
@@ -145,6 +146,7 @@ impl KuboClient {
         let url = format!("{}/api/v0/id", self.base_url);
         let resp = self
             .post(&url)
+            .timeout(Duration::from_secs(2))
             .send()
             .await
             .map_err(|e| StorageError::ConnectionFailed(format!("id: {e}")))?;

@@ -37,3 +37,4 @@ prometheus = "0.13"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "signal"] }
+reqwest.workspace = true

@@ -17,6 +17,7 @@ pub struct IpfsStorageProvider {
     config: IpfsConfig,
     inner: Mutex<Inner>,
     http_client: Option<KuboClient>,
+    require_kubo: bool,
 }
 
 struct Inner {
@@ -37,7 +38,23 @@ impl IpfsStorageProvider {
                 cache,
             }),
             http_client,
+            require_kubo: false,
         }
+    }
+
+    /// Daemon mode: construction and remote writes must succeed through Kubo.
+    pub fn try_new(config: IpfsConfig) -> Result<Self, StorageError> {
+        let client = KuboClient::new(&config)?;
+        let cache = TtlLruCache::new(config.cache_capacity, config.cache_ttl_secs);
+        Ok(Self {
+            config,
+            inner: Mutex::new(Inner {
+                stats: StorageStats::default(),
+                cache,
+            }),
+            http_client: Some(client),
+            require_kubo: true,
+        })
     }
 
     /// Create a provider in pure in-memory mode (no HTTP client).
@@ -51,6 +68,7 @@ impl IpfsStorageProvider {
                 cache,
             }),
             http_client: None,
+            require_kubo: false,
         }
     }
 
@@ -74,6 +92,7 @@ impl StorageProvider for IpfsStorageProvider {
         let final_hash = if let Some(ref client) = self.http_client {
             match client.add(data.to_vec()).await {
                 Ok(resp) => resp.hash,
+                Err(error) if self.require_kubo => return Err(error),
                 Err(_) => local_hash.clone(),
             }
         } else {
