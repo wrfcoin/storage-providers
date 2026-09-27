@@ -133,7 +133,7 @@ impl GarbageCollector {
 
                 // Determine the artifact class from the domain and quality.
                 // In a real implementation, this would come from metadata.
-                let artifact_class = format!("{:?}", domain).to_lowercase();
+                let artifact_class = format!("{domain:?}").to_lowercase();
 
                 // Check retention for the target tier.
                 let should_retain = self.retention_manager.should_retain(
@@ -163,7 +163,7 @@ impl GarbageCollector {
         }
 
         // Clean up expired quarantine records.
-        for (_content_id, record) in &self.quarantine_records {
+        for record in self.quarantine_records.values() {
             let age_secs = current_time_secs.saturating_sub(record.detected_at);
             // Default quarantine max age: 7 days
             if age_secs > 7 * 86400 {
@@ -172,14 +172,14 @@ impl GarbageCollector {
         }
 
         // Clean up expired Filecoin deals.
-        for (_deal_id, expires_at) in &self.filecoin_deals {
+        for expires_at in self.filecoin_deals.values() {
             if current_time_secs >= *expires_at {
                 summary.expired_filecoin_deals_cleaned += 1;
             }
         }
 
         // Clean up stale tier-promotion entries (older than max_age).
-        for (_content_id, promoted_at) in &self.tier_promotions {
+        for promoted_at in self.tier_promotions.values() {
             let age_secs = current_time_secs.saturating_sub(*promoted_at);
             if age_secs > tier_promotion_max_age_secs {
                 summary.stale_tier_promotions_cleaned += 1;
@@ -249,14 +249,6 @@ mod tests {
         fn deleted_count(&self) -> usize {
             self.deleted_ids.lock().unwrap().len()
         }
-
-        fn was_deleted(&self, content_id: &str) -> bool {
-            self.deleted_ids
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|id| id == content_id)
-        }
     }
 
     #[async_trait]
@@ -274,7 +266,7 @@ mod tests {
 
         async fn retrieve(
             &self,
-            id: &ContentId,
+            _id: &ContentId,
         ) -> Result<Vec<u8>, wrfcoin_storage_common::StorageError> {
             Ok(vec![1, 2, 3])
         }
@@ -482,11 +474,11 @@ mod tests {
             let entry = wrfcoin_storage_common::IndexEntry {
                 content_id: ContentId {
                     provider: "ipfs".to_string(),
-                    hash: format!("Qm_entry_{}", i),
+                    hash: format!("Qm_entry_{i}"),
                 },
                 domain: EnvironmentalDomain::Weather,
-                station_id: format!("stn-{}", i),
-                report_id: format!("report-{}", i),
+                station_id: format!("stn-{i}"),
+                report_id: format!("report-{i}"),
                 stored_at: 1000 + (i as u64 * 100), // staggered timestamps
             };
             gc.add_content(entry);
@@ -606,6 +598,7 @@ mod tests {
         // and duplicate content candidates.
 
         // This test passes if the code compiles - the methods are verified to exist.
-        assert!(true, "gc_adapter integration methods are available");
+        let _ = GarbageCollector::get_orphaned_candidates_from_registry;
+        let _ = GarbageCollector::get_duplication_candidates_from_registry;
     }
 }

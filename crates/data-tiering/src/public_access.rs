@@ -190,8 +190,7 @@ impl PublicInterestAccessManager {
             return AccessCheckResult {
                 allowed: false,
                 reason: format!(
-                    "trust class {:?} is not permitted for {:?} access tier",
-                    requester_trust, effective_tier
+                    "trust class {requester_trust:?} is not permitted for {effective_tier:?} access tier"
                 ),
                 effective_tier,
             };
@@ -455,7 +454,7 @@ mod tests {
         for trust in [TrustClass::Probation, TrustClass::Untrusted] {
             let result =
                 mgr.check_access("weather.restricted", &trust, 0.0, false, &DataTier::Archive);
-            assert!(!result.allowed, "RestrictedAccess should deny {:?}", trust);
+            assert!(!result.allowed, "RestrictedAccess should deny {trust:?}");
         }
     }
 
@@ -481,7 +480,7 @@ mod tests {
         ] {
             let result =
                 mgr.check_access("weather.internal", &trust, 0.0, false, &DataTier::Archive);
-            assert!(!result.allowed, "InternalOnly should deny {:?}", trust);
+            assert!(!result.allowed, "InternalOnly should deny {trust:?}");
         }
     }
 

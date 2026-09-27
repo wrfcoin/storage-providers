@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 
 /// Errors returned by [`DataQualityScore::new`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+// Preserve the vendored public variant names for downstream compatibility.
+#[allow(clippy::enum_variant_names)]
 #[non_exhaustive]
 pub enum DataQualityError {
     /// The `overall` score is not finite or not in [0.0, 1.0].

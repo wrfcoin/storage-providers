@@ -188,10 +188,10 @@ async fn test_archive_fails_below_min_copies() {
     let err = result.unwrap_err();
     match err {
         StorageError::ProviderError(msg) => {
-            assert!(msg.contains("1"), "expected '1' in error: {}", msg);
-            assert!(msg.contains("3"), "expected '3' in error: {}", msg);
+            assert!(msg.contains("1"), "expected '1' in error: {msg}");
+            assert!(msg.contains("3"), "expected '3' in error: {msg}");
         }
-        other => panic!("expected ProviderError, got: {:?}", other),
+        other => panic!("expected ProviderError, got: {other:?}"),
     }
 }
 
@@ -250,9 +250,9 @@ async fn test_retrieve_fails_all_corrupted() {
     assert!(result.is_err());
     match result.unwrap_err() {
         StorageError::NotFound(msg) => {
-            assert!(msg.contains("No provider"), "unexpected message: {}", msg);
+            assert!(msg.contains("No provider"), "unexpected message: {msg}");
         }
-        other => panic!("expected NotFound, got: {:?}", other),
+        other => panic!("expected NotFound, got: {other:?}"),
     }
 }
 
