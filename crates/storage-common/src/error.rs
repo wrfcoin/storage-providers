@@ -49,6 +49,10 @@ pub enum StorageError {
     #[error("internal error: {0}")]
     Internal(String),
 
+    /// Retrieved content does not hash to the CID it was requested under.
+    #[error("integrity mismatch: {0}")]
+    IntegrityMismatch(String),
+
     /// A configuration error (e.g. missing or invalid settings).
     #[error("config error: {0}")]
     ConfigError(String),
