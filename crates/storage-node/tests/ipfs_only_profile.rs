@@ -1,4 +1,10 @@
-use axum::{body::Bytes, extract::State, http::HeaderMap, routing::post, Json, Router};
+use axum::{
+    body::Bytes,
+    extract::{Query, State},
+    http::HeaderMap,
+    routing::post,
+    Json, Router,
+};
 use serde_json::{json, Value};
 use std::{
     path::PathBuf,
@@ -73,7 +79,24 @@ impl Daemon {
 struct Calls {
     add: AtomicUsize,
     cat: AtomicUsize,
+    only_hash: AtomicUsize,
     auth: AtomicUsize,
+    /// When set, `cat` returns corrupted bytes for the CID the mock handed out.
+    corrupt: std::sync::atomic::AtomicBool,
+}
+/// The payload of the single multipart part in `body` (the mock's stand-in for UnixFS import).
+fn part_payload(body: &[u8]) -> &[u8] {
+    let start = body
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map(|i| i + 4)
+        .unwrap_or(0);
+    let end = body[start..]
+        .windows(4)
+        .rposition(|w| w == b"\r\n--")
+        .map(|i| start + i)
+        .unwrap_or(body.len());
+    &body[start..end]
 }
 struct Kubo {
     url: String,
@@ -95,7 +118,21 @@ async fn kubo() -> Kubo {
         .route(
             "/api/v0/add",
             post(
-                |State(c): State<Arc<Calls>>, h: HeaderMap, body: Bytes| async move {
+                |State(c): State<Arc<Calls>>,
+                 Query(q): Query<std::collections::HashMap<String, String>>,
+                 h: HeaderMap,
+                 body: Bytes| async move {
+                    if q.get("only-hash").map(String::as_str) == Some("true") {
+                        // Content-addressed stand-in: the opaque CID only for the bytes it was
+                        // handed out for, a different CID for anything else.
+                        c.only_hash.fetch_add(1, Ordering::SeqCst);
+                        let hash = if part_payload(&body) == b"data" {
+                            "bafy-kubo-opaque-cid".to_string()
+                        } else {
+                            format!("bafy-other-{}", part_payload(&body).len())
+                        };
+                        return Json(json!({"Name":"data","Hash":hash,"Size":"4"}));
+                    }
                     c.add.fetch_add(1, Ordering::SeqCst);
                     if h.contains_key("authorization") {
                         c.auth.fetch_add(1, Ordering::SeqCst);
@@ -109,7 +146,11 @@ async fn kubo() -> Kubo {
             "/api/v0/cat",
             post(|State(c): State<Arc<Calls>>| async move {
                 c.cat.fetch_add(1, Ordering::SeqCst);
-                "data"
+                if c.corrupt.load(Ordering::SeqCst) {
+                    "dat4"
+                } else {
+                    "data"
+                }
             }),
         )
         .with_state(calls.clone());
@@ -170,6 +211,41 @@ async fn store_then_retrieve_roundtrip_via_mock_kubo() {
     assert_eq!(r.status(), 200);
     assert_eq!(r.bytes().await.unwrap(), "data");
     assert_eq!(k.calls.cat.load(Ordering::SeqCst), 1);
+}
+#[tokio::test]
+async fn retrieve_verifies_unixfs_content_by_reimport_78() {
+    let k = kubo().await;
+    let mut d = Daemon::spawn(&k.url, &[]);
+    d.ready().await;
+    let b: Value = store(&d).await.json().await.unwrap();
+    let hash = b["content_id"]["hash"].as_str().unwrap().to_string();
+    drop(d);
+    // Fresh daemon (empty cache) so retrieval goes to Kubo; Kubo now serves corrupted bytes.
+    k.calls.corrupt.store(true, Ordering::SeqCst);
+    let mut d = Daemon::spawn(&k.url, &[]);
+    d.ready().await;
+    let r = reqwest::get(format!("{}/api/retrieve/ipfs:{hash}", d.url))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 502, "corrupted content must be refused");
+    let body = r.text().await.unwrap();
+    assert!(body.contains("hashes to"), "body: {body}");
+    assert!(
+        !body.contains("dat4"),
+        "corrupted bytes must not be returned"
+    );
+    assert_eq!(k.calls.only_hash.load(Ordering::SeqCst), 1);
+    drop(d);
+    // Intact content verifies and is returned.
+    k.calls.corrupt.store(false, Ordering::SeqCst);
+    let mut d = Daemon::spawn(&k.url, &[]);
+    d.ready().await;
+    let r = reqwest::get(format!("{}/api/retrieve/ipfs:{hash}", d.url))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.bytes().await.unwrap(), "data");
+    assert_eq!(k.calls.only_hash.load(Ordering::SeqCst), 2);
 }
 #[tokio::test]
 async fn filecoin_request_is_501_not_in_testnet() {
