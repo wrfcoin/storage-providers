@@ -134,6 +134,16 @@ impl StorageProvider for IpfsStorageProvider {
         // Cache miss — try HTTP if available.
         if let Some(ref client) = self.http_client {
             if let Ok(data) = client.cat(&id.hash).await {
+                // Do not trust the daemon's answer blindly: re-import the bytes and require the
+                // CID Kubo assigns to equal the requested one. Failing to verify is a refusal,
+                // never an unverified success.
+                let computed = client.add_only_hash(data.clone()).await?;
+                if computed != id.hash {
+                    return Err(StorageError::IntegrityMismatch(format!(
+                        "retrieved content hashes to {computed}, requested {}",
+                        id.hash
+                    )));
+                }
                 let mut inner = self
                     .inner
                     .lock()
