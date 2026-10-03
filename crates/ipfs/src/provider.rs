@@ -77,6 +77,27 @@ impl IpfsStorageProvider {
         wrfcoin_storage_common::hashing::ipfs_content_id(data).hash
     }
 
+    /// Require that `data` re-imports (Kubo `add?only-hash=true`, the same default import parameters
+    /// as `store`) to exactly `expected_cid`. A mismatch is [`StorageError::IntegrityMismatch`]; an
+    /// unreachable or erroring Kubo is an error, never an unverified success. Without a Kubo client
+    /// there is nothing to verify against and this refuses.
+    pub async fn verify_retrieved(
+        &self,
+        expected_cid: &str,
+        data: &[u8],
+    ) -> Result<(), StorageError> {
+        let client = self.http_client.as_ref().ok_or_else(|| {
+            StorageError::ProviderError("no Kubo client to verify retrieved content".to_string())
+        })?;
+        let computed = client.add_only_hash(data.to_vec()).await?;
+        if computed != expected_cid {
+            return Err(StorageError::IntegrityMismatch(format!(
+                "retrieved content hashes to {computed}, requested {expected_cid}"
+            )));
+        }
+        Ok(())
+    }
+
     /// Return a reference to the current configuration.
     pub fn config(&self) -> &IpfsConfig {
         &self.config
@@ -137,13 +158,7 @@ impl StorageProvider for IpfsStorageProvider {
                 // Do not trust the daemon's answer blindly: re-import the bytes and require the
                 // CID Kubo assigns to equal the requested one. Failing to verify is a refusal,
                 // never an unverified success.
-                let computed = client.add_only_hash(data.clone()).await?;
-                if computed != id.hash {
-                    return Err(StorageError::IntegrityMismatch(format!(
-                        "retrieved content hashes to {computed}, requested {}",
-                        id.hash
-                    )));
-                }
+                self.verify_retrieved(&id.hash, &data).await?;
                 let mut inner = self
                     .inner
                     .lock()
