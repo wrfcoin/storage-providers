@@ -37,6 +37,7 @@ impl IntoResponse for ApiError {
             StorageError::ProviderError(ref msg) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, msg.clone())
             }
+            StorageError::IntegrityMismatch(ref msg) => (StatusCode::BAD_GATEWAY, msg.clone()),
             StorageError::Internal(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
             StorageError::ConfigError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
         };

@@ -87,6 +87,33 @@ impl KuboClient {
             .map_err(|e| StorageError::ProviderError(format!("add parse: {e}")))
     }
 
+    /// Compute the CID Kubo would assign to `data` without storing it
+    /// (`POST /api/v0/add?only-hash=true`). It uses the same import parameters as
+    /// [`KuboClient::add`] (Kubo defaults, UnixFS/dag-pb), so for content this node stored the
+    /// result equals the CID `add` returned. A UnixFS CID is not the raw SHA-256 of the file
+    /// bytes, so integrity is checked by re-importing, never by comparing a raw digest.
+    pub async fn add_only_hash(&self, data: Vec<u8>) -> Result<String, StorageError> {
+        let url = format!("{}/api/v0/add?only-hash=true", self.base_url);
+        let part = reqwest::multipart::Part::bytes(data).file_name("data");
+        let form = reqwest::multipart::Form::new().part("file", part);
+        let resp = self
+            .post(&url)
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed(format!("add only-hash: {e}")))?;
+        if !resp.status().is_success() {
+            return Err(StorageError::ProviderError(format!(
+                "add only-hash: HTTP {}",
+                resp.status()
+            )));
+        }
+        resp.json::<AddResponse>()
+            .await
+            .map(|r| r.hash)
+            .map_err(|e| StorageError::ProviderError(format!("add only-hash parse: {e}")))
+    }
+
     /// Retrieve data from IPFS via `POST /api/v0/cat?arg={cid}`.
     pub async fn cat(&self, cid: &str) -> Result<Vec<u8>, StorageError> {
         let url = format!("{}/api/v0/cat?arg={}", self.base_url, cid);
