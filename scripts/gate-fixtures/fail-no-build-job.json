@@ -1,0 +1,15 @@
+{
+ "jobs": [
+  {
+   "name": "gate",
+   "conclusion": "success",
+   "runner_name": "n5pro-1",
+   "steps": [
+    {
+     "name": "x",
+     "conclusion": "success"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "jobs": [
+  {
+   "name": "build",
+   "conclusion": "success",
+   "runner_name": "n5pro-ct102-3",
+   "steps": [
+    {
+     "name": "Workspace gate",
+     "conclusion": "failure"
+    }
+   ]
+  },
+  {
+   "name": "gate",
+   "conclusion": null,
+   "runner_name": "n5pro-ct102-3",
+   "steps": []
+  }
+ ]
+}
