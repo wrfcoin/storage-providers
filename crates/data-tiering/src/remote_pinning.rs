@@ -314,25 +314,50 @@ impl RemotePinningManager {
     }
 
     /// Check status of a pin on all services.
-    // Preserve existing lock lifetime in this mechanical lint-only repair.
-    // Narrow exception: changing to a snapshot is a separate concurrency change.
-    #[allow(clippy::await_holding_lock)]
+    ///
+    /// Lock policy (#79): the CID's `service -> request_id` entries are copied under the read
+    /// lock, the guard is dropped, and only then are the services queried. No std lock is held
+    /// across an `.await`, so a slow or yielding status call never blocks `request_pin_on_*`.
+    /// The result reflects the pins recorded when the snapshot was taken; a pin added while
+    /// statuses are being fetched appears on the next call.
     pub async fn check_pin_status_on_all(
         &self,
         cid: &str,
     ) -> Result<HashMap<String, RemotePinStatus>, String> {
+        self.collect_pin_statuses(cid, |service_name, request_id| async move {
+            self.check_pin_status(&service_name, &request_id).await
+        })
+        .await
+    }
+
+    async fn collect_pin_statuses<F, Fut>(
+        &self,
+        cid: &str,
+        probe: F,
+    ) -> Result<HashMap<String, RemotePinStatus>, String>
+    where
+        F: Fn(String, String) -> Fut,
+        Fut: std::future::Future<Output = Result<RemotePinStatus, String>>,
+    {
+        let snapshot: Vec<(String, String)> = {
+            let pins = self
+                .pin_requests
+                .read()
+                .map_err(|e| format!("failed to acquire read lock: {e}"))?;
+            pins.get(cid)
+                .map(|services| {
+                    services
+                        .iter()
+                        .map(|(service, request_id)| (service.clone(), request_id.clone()))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+
         let mut results = HashMap::new();
-
-        let pins = self
-            .pin_requests
-            .read()
-            .map_err(|e| format!("failed to acquire read lock: {e}"))?;
-
-        if let Some(services) = pins.get(cid) {
-            for (service_name, request_id) in services {
-                if let Ok(status) = self.check_pin_status(service_name, request_id).await {
-                    results.insert(service_name.clone(), status);
-                }
+        for (service_name, request_id) in snapshot {
+            if let Ok(status) = probe(service_name.clone(), request_id).await {
+                results.insert(service_name, status);
             }
         }
 
@@ -519,6 +544,57 @@ mod tests {
 
         let statuses = manager.check_pin_status_on_all(cid).await.unwrap();
         assert_eq!(statuses.len(), 2);
+    }
+
+    /// #79: no std lock may be held while a status call is awaited, and a pin added while
+    /// statuses are fetched must be neither lost nor block the writer.
+    #[tokio::test]
+    async fn status_check_holds_no_lock_across_await_79() {
+        let mut manager = RemotePinningManager::new();
+        for name in ["svc1", "svc2"] {
+            manager.add_service(RemotePinServiceConfig {
+                name: name.to_string(),
+                endpoint: format!("https://{name}.example/psa"),
+                access_token: "token".to_string(),
+                max_pin_size_bytes: None,
+            });
+        }
+        let cid = "QmLock79";
+        manager.request_pin_on_all(cid, None).await.unwrap();
+
+        let probes = std::sync::atomic::AtomicUsize::new(0);
+        let statuses = manager
+            .collect_pin_statuses(cid, |service, _request_id| {
+                let manager = &manager;
+                let probes = &probes;
+                async move {
+                    probes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    // A yielding client: suspend at an await point, then prove a writer can
+                    // take the write lock right now (and does, adding a pin for another CID).
+                    tokio::task::yield_now().await;
+                    manager
+                        .pin_requests
+                        .try_write()
+                        .expect("pin_requests lock must be free while a status call is awaited")
+                        .entry("QmAddedDuringStatus79".to_string())
+                        .or_default()
+                        .insert(service, "req-added".to_string());
+                    Ok(RemotePinStatus::Pinning)
+                }
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(probes.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert_eq!(statuses.len(), 2);
+        // The concurrent additions are visible on the next call, not lost.
+        assert_eq!(
+            manager
+                .get_request_id("QmAddedDuringStatus79", "svc1")
+                .unwrap(),
+            Some("req-added".to_string())
+        );
+        assert_eq!(manager.check_pin_status_on_all(cid).await.unwrap().len(), 2);
     }
 
     #[test]
