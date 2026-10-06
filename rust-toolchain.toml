@@ -1,0 +1,7 @@
+# Pins the toolchain CI uses instead of whatever `stable` a shared self-hosted runner happens to hold
+# (CT102's `stable` became a minimal 1.99.0 without rustfmt/clippy on 2026-10-02). 1.88.0 matches the
+# storage-node Docker builder (`rust:1.88-bookworm`, digest-pinned in infra's Dockerfile.storage).
+# Channel ONLY, deliberately: listing `components` makes rustup try to download them inside that
+# builder, which has neither rustfmt nor clippy and builds offline.
+[toolchain]
+channel = "1.88.0"
