@@ -1,7 +1,13 @@
 # WRFCoin Storage Providers
 
+## Public testnet
+
+Public testnet launch: **2026-10-22**. Testnet tokens have no monetary value.
+Visit [WRFCoin](https://wrfcoin.com), read the [documentation](https://github.com/wrfcoin/docs),
+and ask for help in [testnet-support](https://github.com/wrfcoin/testnet-support).
+
 [![Rust 1.70+](https://img.shields.io/badge/Rust-1.70%2B-000000?logo=rust)](https://www.rust-lang.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+Licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
 
 Storage clients and tiering libraries for WRFCoin. The default storage-node testnet profile enables only a self-hosted Kubo/IPFS node. Filecoin and Arweave are not in this testnet. Incomplete paid-provider writes fail closed.
 
@@ -67,13 +73,9 @@ fresh-clone build. Each step reports its exit status; success requires nonzero
 passed tests. Exit 1 means failure; exit 2 means VOID (missing Cargo or zero tests).
 The selftest exercises failing tests, missing Cargo, zero tests and a passing test.
 
-The workflow targets the approved `[self-hosted, n5pro]` labels (core4#3232).
-This repository currently has no CT102 runner: local invocation is the evidence
-for the 2026-09-27 build contract. When a CT102 runner is assigned, run these same
-commands there and record the head SHA, exit code and nonzero test count.
-Queued, skipped or zero-step jobs are not validation evidence. The dependent
-gate verifies that the build succeeded with executed steps; it cannot execute
-until a runner is available. No paid provider or hosted runner is needed.
+The dependent workflow gate requires successful build steps and a nonzero test
+count. Queued, skipped or zero-step jobs are not validation evidence. Record the
+commit, command, exit status and test count when reporting validation results.
 
 ## Compatibility types
 
@@ -119,7 +121,7 @@ Build locally: `docker build -t storage-node:testnet .`. The multi-stage image
 uses locked Cargo dependencies and a distroless non-root runtime. Building does
 not deploy or push the image. Test the actual daemon without live services:
 `cargo test -p wrfcoin-storage-node --test ipfs_only_profile` (seven loopback tests).
-The repository has no CT102 runner; report these tests as local evidence.
+Report the environment and executed test count alongside these results.
 
 ## Deferred (needs funded wallets)
 
