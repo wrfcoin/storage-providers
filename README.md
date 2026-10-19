@@ -8,7 +8,9 @@ Rust storage clients, integrity checks and data-tiering libraries for WRFCoin.
 
 Test status (2026-10-19): `cargo test` passed at `b8b300e4a7e7` on Linux (583 passed, 5 ignored; default features; local tests, not deployment evidence).
 
-Public testnet launch: **2026-10-22**. Testnet tokens have no monetary value, and the network may be reset.
+Public testnet launch: **2026-10-22**.
+
+This is a test network. It may be reset without notice. Balances and tokens have no monetary value. No migration to mainnet is promised or implied. Please attach no production bridges, exchange listings or irreplaceable assets.
 
 - [WRFCoin website](https://wrfcoin.com)
 - [Public testnet quickstart](https://github.com/wrfcoin/docs/blob/main/testnet/quickstart.md)
