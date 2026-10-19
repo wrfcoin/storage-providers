@@ -1,16 +1,22 @@
 {
- "jobs": [
-  {
-   "name": "build",
-   "conclusion": "success",
-   "runner_name": "n5pro-ct102-3",
-   "steps": null
-  },
-  {
-   "name": "gate",
-   "conclusion": null,
-   "runner_name": "n5pro-ct102-3",
-   "steps": []
-  }
- ]
+  "jobs": [
+    {
+      "name": "build",
+      "conclusion": "success",
+      "runner_name": "GitHub Actions 1",
+      "steps": null,
+      "labels": [
+        "ubuntu-latest"
+      ]
+    },
+    {
+      "name": "gate",
+      "conclusion": null,
+      "runner_name": "GitHub Actions 1",
+      "steps": [],
+      "labels": [
+        "ubuntu-latest"
+      ]
+    }
+  ]
 }

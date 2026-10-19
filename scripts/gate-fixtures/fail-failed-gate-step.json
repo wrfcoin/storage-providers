@@ -1,21 +1,27 @@
 {
- "jobs": [
-  {
-   "name": "build",
-   "conclusion": "success",
-   "runner_name": "n5pro-ct102-3",
-   "steps": [
+  "jobs": [
     {
-     "name": "Workspace gate",
-     "conclusion": "failure"
+      "name": "build",
+      "conclusion": "success",
+      "runner_name": "GitHub Actions 1",
+      "steps": [
+        {
+          "name": "Workspace gate",
+          "conclusion": "failure"
+        }
+      ],
+      "labels": [
+        "ubuntu-latest"
+      ]
+    },
+    {
+      "name": "gate",
+      "conclusion": null,
+      "runner_name": "GitHub Actions 1",
+      "steps": [],
+      "labels": [
+        "ubuntu-latest"
+      ]
     }
-   ]
-  },
-  {
-   "name": "gate",
-   "conclusion": null,
-   "runner_name": "n5pro-ct102-3",
-   "steps": []
-  }
- ]
+  ]
 }
