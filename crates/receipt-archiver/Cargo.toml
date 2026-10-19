@@ -1,4 +1,5 @@
 [package]
+description = "Forecast receipt archival and retrieval for WRFCoin storage"
 name = "receipt-archiver"
 version.workspace = true
 edition.workspace = true
