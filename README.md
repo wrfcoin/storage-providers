@@ -1,12 +1,31 @@
 # WRFCoin Storage Providers
 
+Rust storage clients, integrity checks and data-tiering libraries for WRFCoin.
+
+**These clients are not yet wired to the live network.** The local testnet profile supports Kubo/IPFS only; it does not establish public-network storage availability.
+
 ## Public testnet
 
-Public testnet launch: **2026-10-22**. Testnet tokens have no monetary value.
-Visit [WRFCoin](https://wrfcoin.com), read the [documentation](https://github.com/wrfcoin/docs),
-and ask for help in [testnet-support](https://github.com/wrfcoin/testnet-support).
+Public testnet launch: **2026-10-22**. Testnet tokens have no monetary value, and the network may be reset.
 
-[![Rust 1.70+](https://img.shields.io/badge/Rust-1.70%2B-000000?logo=rust)](https://www.rust-lang.org/)
+- [WRFCoin website](https://wrfcoin.com)
+- [Public testnet quickstart](https://github.com/wrfcoin/docs/blob/main/testnet/quickstart.md)
+- [Help and bug reports](https://github.com/wrfcoin/testnet-support)
+- [Security reporting](SECURITY.md)
+
+## Today and planned work
+
+| Status | Scope |
+| --- | --- |
+| Available in this repository today | IPFS-only storage-node profile, health/stats endpoints and loopback integration tests. |
+| Planned / not available here | Live-network integration remains future work. Filecoin has no working read/write path; Arweave writes and paid-provider signing remain unavailable. |
+
+## Build and use
+
+See [CONTRIBUTING.md](CONTRIBUTING.md#build-and-test) for prerequisites and build/test commands. CI results apply only to the named commit and executed checks; they do not prove deployment.
+
+Licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
+
 Licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
 
 Storage clients and tiering libraries for WRFCoin. The default storage-node testnet profile enables only a self-hosted Kubo/IPFS node. Filecoin and Arweave are not in this testnet. Incomplete paid-provider writes fail closed.
@@ -23,7 +42,7 @@ The storage ecosystem is designed as a modular Rust workspace, ensuring type-saf
 - **`arweave`**: Incomplete client — read-only / not in this testnet. Transaction signing is not implemented.
 - **`data-tiering`**: The orchestrator. Implements intelligent migration of data between tiers based on age, frequency of access, and provenance policies.
 
-## 📡 Data Tiering Model
+## 📡 Data Tiering Model (design targets, not measured network latency)
 
 | Tier | Provider | Access Latency | Primary Use Case |
 |------|----------|----------------|------------------|
@@ -42,7 +61,7 @@ The storage ecosystem is designed as a modular Rust workspace, ensuring type-saf
 ## 🛠 Getting Started
 
 ### Prerequisites
-- **Rust**: 1.70+ (Stable)
+- **Rust**: use the version pinned in `rust-toolchain.toml`
 - **IPFS Node**: Required for local testing of the IPFS provider.
 - **Credentials**: None for the testnet profile. Tests use loopback mocks.
 
