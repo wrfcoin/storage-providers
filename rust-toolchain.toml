@@ -1,5 +1,4 @@
-# Pins the toolchain CI uses instead of whatever `stable` a shared self-hosted runner happens to hold
-# (CT102's `stable` became a minimal 1.99.0 without rustfmt/clippy on 2026-10-02). 1.88.0 is the version
+# Pins CI to the storage-node builder toolchain rather than a changing stable release.
 # of the storage-node Docker builder (`rust:1.88-bookworm`, digest-pinned in infra's Dockerfile.storage),
 # so CI checks what ships; that builder gets 1.88 from its image digest, since neither Dockerfile copies
 # this file. Channel ONLY, deliberately: listing `components` would make rustup download them anywhere
